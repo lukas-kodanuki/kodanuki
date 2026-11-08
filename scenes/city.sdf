@@ -1,0 +1,769 @@
+import "standard.sdf";
+
+render {
+	width     = 1920;
+	height    = 1200;
+	tolerance = 2;
+	far       = 1300;
+}
+
+camera {
+	eye    = [365, -45, 48];
+	target = [371, 311.64, -6];
+	fov    = 0.9;
+}
+
+grade {
+	exposure = 1.1;
+	curve    = filmic;
+}
+
+sky physical {
+	haze     = 1.3;
+	ground   = [0.28, 0.30, 0.26];
+	glow     = [1, 0.8, 0.55];
+	strength = 0.5;
+	spread   = 0.12;
+}
+
+clouds {
+	height    = 1500;
+	thickness = 800;
+	cover     = 0.34;
+	density   = 0.03;
+	span      = 2500;
+}
+
+light sun {
+	direction = [-0.5, 0.3, 0.62];
+	angle     = 0.0093;
+	power     = [3.1, 3, 2.8];
+}
+
+let grass    = matte([0.14, 0.27, 0.07]);
+let asphalt  = matte([0.07, 0.07, 0.075]);
+let stone    = matte([0.68, 0.64, 0.56]);
+let paving   = matte([0.50, 0.48, 0.44]);
+let cobbles  = matte([0.56, 0.50, 0.42]);
+let gravel   = matte([0.66, 0.60, 0.50]);
+let stripes  = matte([0.82, 0.80, 0.74]);
+let interior = matte([0.46, 0.40, 0.34]);
+let bark     = matte([0.24, 0.18, 0.13]);
+let tyre     = matte([0.03, 0.03, 0.03]);
+let skin     = matte([0.70, 0.52, 0.40]);
+let copper   = matte([0.30, 0.56, 0.48]);
+let canvas   = matte([0.85, 0.82, 0.76]);
+let globe    = matte([0.92, 0.92, 0.88]);
+let bulb     = matte([0.90, 0.90, 0.85]);
+let pond     = plastic([0.02, 0.05, 0.05], roughness = 0.02);
+let smoked   = plastic([0.02, 0.025, 0.03], roughness = 0.03);
+let hull     = plastic([0.85, 0.85, 0.82], roughness = 0.2);
+let yellow   = plastic([0.85, 0.72, 0.12], roughness = 0.2);
+let steel    = metal([0.55, 0.56, 0.58], roughness = 0.3);
+let pane     = glass(refraction = 1.52, dispersion = 0.006, absorb = [0.020203, 0.01005, 0.01005], roughness = 0);
+let fountain = glass(refraction = 1.333, absorb = [0.159345, 0.06615, 0.08282], roughness = 0);
+let river    = glass(refraction = 1.333, absorb = [0.40866, 0.231927, 0.191214], roughness = 0);
+
+let STUCCO = [
+	matte([0.88, 0.82, 0.68]),
+	matte([0.86, 0.68, 0.44]),
+	matte([0.82, 0.62, 0.55]),
+	matte([0.74, 0.78, 0.80]),
+	matte([0.92, 0.90, 0.86]),
+	matte([0.66, 0.70, 0.56]),
+	matte([0.80, 0.54, 0.40]),
+	matte([0.52, 0.28, 0.20]),
+];
+
+let ROOFS = [
+	matte([0.50, 0.21, 0.12]),
+	matte([0.42, 0.17, 0.10]),
+	plastic([0.20, 0.21, 0.24], roughness = 0.4),
+];
+
+let GREENS = [
+	matte([0.12, 0.26, 0.06]),
+	matte([0.16, 0.30, 0.08]),
+	matte([0.10, 0.20, 0.07]),
+	matte([0.22, 0.32, 0.08]),
+	matte([0.30, 0.30, 0.08]),
+];
+
+let PAINTS = [
+	plastic([0.70, 0.70, 0.70], roughness = 0.15),
+	plastic([0.05, 0.05, 0.06], roughness = 0.15),
+	plastic([0.60, 0.06, 0.05], roughness = 0.15),
+	plastic([0.06, 0.12, 0.35], roughness = 0.15),
+	plastic([0.40, 0.42, 0.44], roughness = 0.15),
+	plastic([0.85, 0.85, 0.82], roughness = 0.15),
+	plastic([0.10, 0.25, 0.14], roughness = 0.15),
+	plastic([0.75, 0.55, 0.10], roughness = 0.15),
+];
+
+let CLOTHES = [
+	matte([0.10, 0.10, 0.12]),
+	matte([0.12, 0.16, 0.30]),
+	matte([0.55, 0.10, 0.10]),
+	matte([0.60, 0.58, 0.52]),
+	matte([0.20, 0.30, 0.20]),
+	matte([0.75, 0.62, 0.30]),
+	matte([0.85, 0.85, 0.85]),
+	matte([0.30, 0.20, 0.35]),
+];
+
+function upright(base, span) {
+	return clamp((p.z - base) / span, 0, 1);
+}
+
+let slope = matte(ramp(world(upright(0, 114.5256)), [0.07, 0.13, 0.05], [0.07, 0.13, 0.05], [0.07, 0.13, 0.05], [0.07, 0.13, 0.05], [0.36, 0.34, 0.32], [0.36, 0.34, 0.32], [0.36, 0.34, 0.32], [0.36, 0.34, 0.32], [0.90, 0.92, 0.95], [0.90, 0.92, 0.95], [0.90, 0.92, 0.95], [0.90, 0.92, 0.95]));
+
+let seed   = 49534;
+let u      = 0;
+let picked = 0;
+
+shape draw() {
+	let seed = seed * 16807;
+	let seed = seed - floor(seed / 2147483647) * 2147483647;
+	let u    = seed / 2147483647;
+}
+
+shape pick(choices) {
+	draw();
+	let picked = floor(u * choices);
+}
+
+shape choose(weights) {
+	draw();
+	let total = 0;
+	for weight in weights {
+		let total = total + weight;
+	}
+	let target = u * total;
+	let index  = 0;
+	let sum    = 0;
+	for weight in weights {
+		let sum   = sum + weight;
+		let index = index + select(target >= sum, 1, 0);
+	}
+	let picked = min(index, count(weights) - 1);
+}
+
+function grid(size, counts, steps) {
+	let i = clamp(floor(p.x / steps.x + 0.5), 0, counts.x - 1);
+	let k = clamp(floor(p.z / steps.z + 0.5), 0, counts.z - 1);
+	let q = abs(p - [i * steps.x, 0, k * steps.z]) - size / 2;
+	return length(max(q, 0)) + min(max(q.x, max(q.y, q.z)), 0);
+}
+
+function posts(height, radius, number, step) {
+	let k = clamp(floor(p.y / step + 0.5), 0, number - 1);
+	let d = abs([length([p.x, p.y - k * step]), p.z]) - [radius, height / 2];
+	return min(max(d.x, d.y), 0) + length(max(d, 0));
+}
+
+function rod(height, radius) {
+	let half = max(height - radius * 2, 0) * 0.5;
+	return length([p.x, p.y, p.z - clamp(p.z, -half, half)]) - radius;
+}
+
+function tube(height, radius, thickness) {
+	let d = abs([abs(length(p.xy) - radius) - thickness * 0.5, p.z]) - [0, height * 0.5];
+	return min(max(d.x, d.y), 0) + length(max(d, 0));
+}
+
+function spire(height, base) {
+	let wide  = base * (1 - clamp(p.z / height + 0.5, 0, 1));
+	let wedge = 2 * pi / 8;
+	let reach = p.x;
+	for k in 1..8 {
+		let reach = max(reach, p.x * cos(wedge * k) + p.y * sin(wedge * k));
+	}
+	let flat   = cos(wedge * 0.5);
+	let around = reach - wide * flat;
+	let cap    = abs(p.z) - height * 0.5;
+	let lean   = base * flat / height;
+	return (min(max(around, cap), 0) + length(max([around, cap], 0))) / sqrt(1 + lean * lean);
+}
+
+shape tree(place, scale) {
+	choose([6, 1.5, 1]);
+	let kind = picked;
+	pick(5);
+	let leaves = GREENS[picked];
+	draw();
+	let size = scale * (0.8 + (1.2 - 0.8) * u);
+	draw();
+	with at(place) turn(z, 6.28 * u) {
+		paint(bark) at([0, 0, 1.6 * size]) cylinder(3.2 * size, 0.18 * size);
+		with paint(leaves) {
+			if kind == 1 {
+				at([0, 0, 5.5 * size]) cone(8 * size, 2.2 * size, 0);
+			}
+			if kind == 2 {
+				at([0, 0, 6.5 * size]) ellipsoid([1.3 * size, 1.3 * size, 5 * size]);
+			}
+			if kind == 0 {
+				merge(0.6 * size) {
+					at([0, 0, 5 * size]) ellipsoid([2.4 * size, 2.4 * size, 2 * size]);
+					at([1.1 * size, 0.4 * size, 4.3 * size]) sphere(1.7 * size);
+					at([-0.5 * size, -0.3 * size, 6.2 * size]) sphere(1.5 * size);
+				}
+			}
+		}
+	}
+}
+
+shape car(place, heading) {
+	draw();
+	let long = 3.9 + (4.7 - 3.9) * u;
+	pick(8);
+	with at([place.x, place.y, 0]) turn(z, heading) {
+		paint(PAINTS[picked]) at([0, 0, 0.72]) box([long, 1.8, 0.72], 0.22);
+		paint(smoked) at([-0.25, 0, 1.3]) box([long * 0.52, 1.6, 0.62], 0.25);
+		with paint(tyre) {
+			at([long * 0.32, 0.78, 0.34]) turn(x, pi * 0.5) cylinder(0.28, 0.34);
+			at([long * 0.32, -0.78, 0.34]) turn(x, -pi * 0.5) cylinder(0.28, 0.34);
+		}
+	}
+}
+
+shape person(place) {
+	draw();
+	let tall = 0.9 + (1.08 - 0.9) * u;
+	pick(8);
+	let coat = CLOTHES[picked];
+	draw();
+	let spin = 6.28 * u;
+	pick(8);
+	with at(place) turn(z, spin) {
+		with paint(CLOTHES[picked]) {
+			at([0, 0.11, 0.45 * tall]) rod(0.95 * tall, 0.09);
+			at([0, -0.11, 0.45 * tall]) rod(0.95 * tall, 0.09);
+		}
+		with paint(coat) {
+			at([0, 0, 1.2 * tall]) rod(0.72 * tall, 0.19);
+			at([0, 0.26, 1.18 * tall]) turn(x, 0.12) rod(0.7 * tall, 0.065);
+			at([0, -0.26, 1.18 * tall]) turn(x, -0.12) rod(0.7 * tall, 0.065);
+		}
+		paint(skin) at([0, 0, 1.68 * tall]) sphere(0.11);
+	}
+}
+
+shape crowd(low, high, number) {
+	for k in 0..number {
+		draw();
+		let px = low.x + (high.x - low.x) * u;
+		draw();
+		person([px, low.y + (high.y - low.y) * u, 0.15]);
+	}
+}
+
+shape rooms(bays, floors, shop) {
+	for side in 0..2 {
+		turn(z, side * pi) at([-(bays - 1) * 2.6 * 0.5, -5.5, 5.15]) grid([1.25, 3.2, 1.9], [bays, 1, floors - 1], [2.6, 1, 3.3]);
+	}
+	if shop.x {
+		at([-(shop.y - 1) * 2, -5.5, 1.5]) grid([3, 3.2, 2.4], [shop.y, 1, 1], [4, 1, 1]);
+	}
+}
+
+shape panes(bays, shop) {
+	for side in 0..2 {
+		turn(z, side * pi) at([-(bays - 1) * 2.6 * 0.5, -5.5 + 0.3, 5.15]) box([1.45, 0.24, 2.1], 0);
+	}
+	if shop.x {
+		at([-(shop.y - 1) * 2, -5.5 + 0.3, 1.5]) box([3.2, 0.24, 2.6], 0);
+	}
+}
+
+shape garden(wide, height) {
+	draw();
+	let across = -2 + (2 - -2) * u;
+	paint(stone) cut {
+		at([0, 0, height + 0.3]) box([wide, 11, 0.6], 0);
+		at([0, 0, height + 0.15]) box([wide - 0.6, 10.4, 1], 0);
+	}
+	paint(grass) at([0, 0, height + 0.15]) box([wide - 0.6, 10.4, 0.3], 0);
+	pick(5);
+	with paint(GREENS[picked]) {
+		at([-wide * 0.25, across, height + 0.6]) ellipsoid([1.4, 1.4, 0.9]);
+		at([-wide * 0.25 + wide * 0.5, across, height + 0.6]) ellipsoid([1.4, 1.4, 0.9]);
+	}
+}
+
+shape roofline(wide, floors, stucco) {
+	let height = floors * 3.3;
+	let over   = (11 + 0.8) / sqrt(2);
+	choose([3, 2, 2]);
+	paint(ROOFS[picked]) at([0, 0, height]) turn(x, pi * 0.25) box([wide, over, over], 0);
+	draw();
+	if u < 0.3 && floors > 2 {
+		let bays = max(1, floor((wide - 0.8) / 2.6));
+		with at([-(bays - 1) * 2.6 * 0.5, 11 * 0.5 + 0.6, 3.3 * 2]) {
+			paint(stone) grid([2, 1.3, 0.18], [bays, 1, floors - 2], [2.6, 1, 3.3]);
+			paint(steel) at([0, 0.55, 0.55]) box([2, 0.08, 0.9], 0);
+		}
+	}
+	draw();
+	if u < 0.5 {
+		pick(2);
+		let sign = select(picked == 0, -1, 1);
+		draw();
+		let across = sign * (0.8 + (2.2 - 0.8) * u);
+		let clear  = height + (11 + 0.8) * 0.5 - abs(across) + 1.5;
+		draw();
+		paint(stucco) at([(-0.5 + (0.5 - -0.5) * u) * (wide - 4), across, (height + 1 + clear) * 0.5]) box([0.7, 0.9, clear - height - 1], 0);
+	}
+	if floors >= 6 {
+		draw();
+		if u < 0.35 {
+			with paint(stucco) {
+				for k in 0..max(1, floor(wide / 5)) {
+					at([k * 4, -11 * 0.25, height + 1.4]) box([1.6, 2.4, 2], 0);
+				}
+			}
+		}
+	}
+}
+
+shape house(middle, heading, size) {
+	let wide   = size.x;
+	let floors = size.y;
+	let bays   = max(1, floor((wide - 0.8) / 2.6));
+	choose([3, 2, 1.5, 1, 3, 1, 1, 1.5]);
+	let stucco = STUCCO[picked];
+	draw();
+	let shop = [u < 0.6, max(1, floor(wide / 4))];
+	with at([middle.x, middle.y, 0.15]) turn(z, heading) {
+		paint(stucco) cut {
+			at([0, 0, floors * 3.3 * 0.5]) box([wide, 11, floors * 3.3], 0);
+			paint(interior) rooms(bays, floors, shop);
+		}
+		paint(stone) at([0, 0, 3.3]) box([wide, 11.35, 0.35], 0);
+		paint(pane) panes(bays, shop);
+		draw();
+		let flat = u < 0.15;
+		if flat {
+			garden(wide, floors * 3.3);
+		}
+		if !flat {
+			roofline(wide, floors, stucco);
+		}
+	}
+}
+
+shape row(start, heading, length, floors) {
+	let ax   = cos(heading);
+	let ay   = sin(heading);
+	let done = 0;
+	for k in 0..8 {
+		if length - done > 0.5 {
+			draw();
+			let wide = 8 + (14 - 8) * u;
+			if length - done - wide < 8 {
+				let wide = length - done;
+			}
+			let centre = done + wide * 0.5;
+			let hx     = start.x + ax * centre;
+			let hy     = start.y + ay * centre;
+			draw();
+			house([hx + -ay * 11 * 0.5, hy + ax * 11 * 0.5], heading, [wide, floors + (-1 + floor(u * 3))]);
+			let done = done + wide;
+		}
+	}
+}
+
+shape kerbside(lx, ly) {
+	for side in 0..4 {
+		let heading = side * pi * 0.5;
+		let ax      = cos(heading);
+		let ay      = sin(heading);
+		let ix      = -ay;
+		let cx      = select(side == 1 || side == 2, lx + 62, lx);
+		let cy      = select(side >= 2, ly + 62, ly);
+		let spot    = 9;
+		for k in 0..6 {
+			if spot < 62 - 8 {
+				draw();
+				if u < 1 {
+					tree([cx + ax * spot + ix * 1.5, cy + ay * spot + ax * 1.5, 0.15], 0.8);
+				}
+				draw();
+				let spot = spot + (9 + (12 - 9) * u);
+			}
+		}
+		let spot = 8;
+		for k in 0..10 {
+			if spot < 62 - 8 {
+				draw();
+				if u < 0.7 {
+					pick(2);
+					car([cx + ax * spot - ix * 1.3, cy + ay * spot - ax * 1.3], heading + select(picked == 0, 0, pi));
+				}
+				draw();
+				let spot = spot + (5.2 + (6.5 - 5.2) * u);
+			}
+		}
+	}
+}
+
+shape perimeter(lx, ly) {
+	let x0     = lx + 5;
+	let y0     = ly + 5;
+	let x1     = x0 + 52;
+	let y1     = y0 + 52;
+	let fx     = (x0 + 26 - 720 * 0.5) / 720;
+	let fy     = (y0 + 26 - 720 * 0.45) / 720;
+	let floors = 5 + floor(max(0, 1 - sqrt(fx * fx + fy * fy) * 2.5) * 2.5);
+	paint(paving) at([lx + 31, ly + 31, 0.075]) box([62, 62, 0.15], 0);
+	row([x0, y0], 0, 52, floors);
+	row([x1, y1], pi, 52, floors);
+	row([x0, y1 - 11], -pi * 0.5, 52 - 22, floors);
+	row([x1, y0 + 11], pi * 0.5, 52 - 22, floors);
+	paint(grass) at([x0 + 26, y0 + 26, 0.2]) box([30, 30, 0.1], 0);
+	for k in 0..7 {
+		draw();
+		let tx = x0 + 11 + 3 + (x1 - 11 - 3 - (x0 + 11 + 3)) * u;
+		draw();
+		let ty = y0 + 11 + 3 + (y1 - 11 - 3 - (y0 + 11 + 3)) * u;
+		draw();
+		tree([tx, ty, 0.25], 0.8 + (1.2 - 0.8) * u);
+	}
+	crowd([lx + 0.5, ly + 0.5], [lx + 5 - 0.5, ly + 62 - 0.5], 7);
+	crowd([lx + 0.5, ly + 0.5], [lx + 62 - 0.5, ly + 5 - 0.5], 7);
+	kerbside(lx, ly);
+}
+
+shape park(lx, ly) {
+	let mx = lx + 31;
+	let my = ly + 31;
+	paint(grass) at([mx, my, 0.075]) box([62, 62, 0.15], 0);
+	paint(gravel) at([mx, my, 0.17]) box([62, 3, 0.2], 0);
+	paint(gravel) at([mx, my, 0.17]) turn(z, pi * 0.5) box([62, 3, 0.2], 0);
+	paint(pond) at([mx + 62 * 0.22, my + 62 * 0.2, 0.15]) ellipsoid([7, 5, 0.3]);
+	pick(5);
+	with paint(GREENS[picked]) {
+		at([mx, ly + 1.2, 0.75]) box([54, 1.2, 1.2], 0.4);
+		at([mx, ly + 1.2 + 59.6, 0.75]) box([54, 1.2, 1.2], 0.4);
+	}
+	for k in 0..24 {
+		draw();
+		let tx = lx + 3 + (lx + 62 - 3 - (lx + 3)) * u;
+		draw();
+		let ty = ly + 3 + (ly + 62 - 3 - (ly + 3)) * u;
+		let dx = tx - mx - 62 * 0.22;
+		let dy = ty - my - 62 * 0.2;
+		if abs(tx - mx) >= 4 && abs(ty - my) >= 4 && sqrt(dx * dx + dy * dy) >= 9 {
+			draw();
+			tree([tx, ty, 0.15], 0.9 + (1.4 - 0.9) * u);
+		}
+	}
+	crowd([mx - 1.2, ly + 2], [mx + 1.2, ly + 62 - 2], 7);
+	crowd([lx + 2, my - 1.2], [lx + 62 - 2, my + 1.2], 7);
+}
+
+shape square(lx, ly, spring) {
+	let mx = lx + 31;
+	let my = ly + 31;
+	paint(cobbles) at([mx, my, 0.075]) box([62, 62, 0.15], 0);
+	if spring {
+		paint(stone) at([mx, my, 0.55]) tube(0.8, 5, 0.5);
+		paint(fountain) at([mx, my, 0.75]) cylinder(0.3, 4.8);
+		paint(stone) at([mx, my, 2.15]) cylinder(4, 0.4);
+		paint(stone) at([mx, my, 3.35]) cone(0.6, 0.6, 1.6);
+	}
+	for side in 0..4, step in 0..6 {
+		let t = -62 * 0.5 + 4 + step * (62 - 8) / 5;
+		draw();
+		if u < 1 {
+			tree([mx + select(side == 0 || side == 2, t, select(side == 1, 28, -28)), my + select(side == 0, -28, select(side == 2, 28, t)), 0.15], 0.9);
+		}
+	}
+	for k in 0..4 {
+		paint(canvas) at([lx + 10 + k * 6, ly + 62 - 12, 2.55]) cone(0.8, 2.2, 0);
+	}
+	paint(steel) at([lx + 10, ly + 62 - 12, 1.35]) cylinder(2.4, 0.05);
+	crowd([lx + 2, ly + 2], [lx + 62 - 2, ly + 62 - 2], 28);
+}
+
+shape cathedral(lx, ly) {
+	with at([lx + 31, ly + 31 + 2, 0.15]) turn(z, pi * 0.5) {
+		paint(stone) cut {
+			at([0, 0, 10]) box([32, 14, 20], 0);
+			with paint(interior) {
+				at([-12, 7, 9]) rod(7, 0.9);
+				at([-12, -7, 9]) rod(7, 0.9);
+			}
+		}
+		with paint(pane) {
+			for k in 0..7 {
+				at([-12 + k * 4, 0, 9]) box([1.9, 14 - 0.6, 7], 0);
+			}
+		}
+		paint(stone) cut {
+			merge {
+				at([-18, 5.5, 17]) box([8, 8, 34], 0);
+				at([-18, -5.5, 17]) box([8, 8, 34], 0);
+			}
+			paint(interior) at([-22.1, 5.5, 27]) rod(4, 0.8);
+		}
+		with paint(copper) {
+			at([0, 0, 20]) turn(x, pi * 0.25) box([32, 14.8 / sqrt(2), 14.8 / sqrt(2)], 0);
+			at([16, 0, 21]) cone(6, 7.4, 0);
+			at([-18, 5.5, 46]) spire(24, 5);
+		}
+		paint(stone) at([16, 0, 9]) cylinder(18, 7);
+		paint(pane) at([-22.1, 0, 14]) turn(y, pi * 0.5) cylinder(0.4, 3.4);
+	}
+}
+
+shape hall(lx, ly) {
+	with paint(stone) at([lx + 31, ly + 31, 0.15]) {
+		at([0, 0, 8]) box([26, 20, 16], 0);
+		at([0, 0, 20]) cylinder(8, 8);
+		at([0, 0, 36.5]) cylinder(3, 1.6);
+		at([0, -12, 16]) turn(y, pi * 0.25) box([12, 4, 12], 0);
+		for k in 0..6 {
+			at([-7.5 + k * 3, -12, 8]) cylinder(16, 0.6);
+		}
+		paint(copper) at([0, 0, 24]) ellipsoid([8.4, 8.4, 11]);
+		paint(copper) at([0, 0, 40.5]) cone(5, 1.9, 0);
+	}
+}
+
+shape block(column, line) {
+	let lx      = column * 72 + 5 + select(column >= 5, 22, 0);
+	let ly      = line * 72 + 5;
+	let church  = column == 5 && line == 4;
+	let domed   = column == 3 && line == 6;
+	let plaza   = (column == 4 && line == 3) || (column == 6 && line == 7);
+	let special = line == 2 || church || domed || plaza;
+	let wooded  = 0;
+	if !special && line > 0 {
+		draw();
+		let wooded = u < 0.14;
+	}
+	if church || domed || plaza {
+		square(lx, ly, plaza);
+	}
+	if church {
+		cathedral(lx, ly);
+	}
+	if domed {
+		hall(lx, ly);
+	}
+	if !special && wooded {
+		park(lx, ly);
+	}
+	if !special && !wooded {
+		perimeter(lx, ly);
+	}
+}
+
+shape mountain(place, tall, wide) {
+	paint(slope) merge(wide * 0.06) {
+		at([place.x, place.y, -25 + tall * 0.5]) cone(tall, wide * 0.7, 0);
+		for k in 0..2 {
+			draw();
+			let high = tall * (0.45 + (0.75 - 0.45) * u);
+			draw();
+			let angle = 6.28 * u;
+			draw();
+			let away = wide * (0.5 + (0.8 - 0.5) * u);
+			draw();
+			at([place.x + cos(angle) * away, place.y + sin(angle) * away * 0.6, -25 + high * 0.5]) cone(high, wide * (0.4 + (0.6 - 0.4) * u), 0);
+		}
+		for k in 0..3 {
+			draw();
+			let heading = k * 2.1 + (-0.5 + (0.5 - -0.5) * u);
+			draw();
+			let fall = atan2(tall, wide * (0.9 + (1.3 - 0.9) * u));
+			let long = tall / sin(fall);
+			draw();
+			let thick = wide * (0.18 + (0.3 - 0.18) * u);
+			let ridge = [place.x + cos(heading) * long * 0.5 * cos(fall), place.y + sin(heading) * long * 0.5 * cos(fall), -25 + tall - long * 0.5 * sin(fall) - thick * 0.3];
+			at(ridge) turn(z, heading) turn(y, fall) turn(x, pi * 0.25) box([long, thick, thick], 0);
+		}
+	}
+}
+
+shape mountains() {
+	let span  = 0.2 * 8192;
+	let lowx  = 371 - span * 0.5;
+	let top   = -60 + span;
+	let right = lowx + span;
+	let flank = min(160, (5 - lowx) * 0.6);
+	let back  = min(260, (top - 725 - 60) * 0.5);
+	let mx    = lowx;
+	for k in 0..10 {
+		if mx < right {
+			draw();
+			let my = top - back * (0.8 + (1 - 0.8) * u);
+			draw();
+			let tall = max((my + 45) * (0.06 + (0.1 - 0.06) * u), 65);
+			draw();
+			let wide = back * (1 + (1.4 - 1) * u);
+			mountain([mx, my], tall, wide);
+			draw();
+			let mx = mx + wide * (0.9 + (1.2 - 0.9) * u);
+		}
+	}
+	for edge in [lowx + flank * 0.8, right - flank * 0.8] {
+		let my = 221;
+		for k in 0..12 {
+			if my < top - back {
+				draw();
+				let wide = flank * (0.8 + (1 - 0.8) * u);
+				draw();
+				mountain([edge, my], min(45 + my * 0.04, span * 0.1) * (0.8 + (1.1 - 0.8) * u), wide);
+				draw();
+				let my = my + wide * (1 + (1.4 - 1) * u);
+			}
+		}
+	}
+}
+
+shape quays(x0) {
+	with paint(stone) {
+		at([x0 + 31, 155 - 3, 0.075]) box([62, 6, 0.15], 0);
+		at([x0 + 31, 155 - 3 + 56, 0.075]) box([62, 6, 0.15], 0);
+	}
+	with paint(steel) {
+		at([x0 + 31, 155 - 0.2, 0.7]) box([62, 0.12, 1.1], 0);
+		at([x0 + 31, 155 - 0.2 + 50.4, 0.7]) box([62, 0.12, 1.1], 0);
+	}
+	for bank in [155 - 3.5, 205 + 3.5] {
+		let spot = 5;
+		for k in 0..8 {
+			if spot < 62 - 4 {
+				draw();
+				if u < 1 {
+					tree([x0 + spot, bank, 0.15], 1);
+				}
+				draw();
+				let spot = spot + (8 + (11 - 8) * u);
+			}
+		}
+	}
+}
+
+shape bridge(middle, wide) {
+	let walk = min(2.2, wide * 0.18);
+	paint(stone) cut {
+		at([middle, 180, -2.75]) box([wide, 51, 5.5], 0);
+		for k in 0..3 {
+			at([middle, 155 + 51 / 6 + k * 17, -8]) turn(y, pi * 0.5) cylinder(wide + 2, 7.2);
+		}
+	}
+	paint(asphalt) at([middle, 180, -0.13]) box([wide - walk * 2, 51, 0.36], 0);
+	paint(stone) at([middle, 180, -0.35]) box([wide + 0.7, 51, 0.45], 0);
+	let sx = middle - wide * 0.5 + 0.25;
+	with paint(stone) {
+		at([sx, 180, 0.27]) box([0.5, 51, 0.24], 0);
+		at([sx, 180, 1.05]) box([0.45, 51, 0.2], 0);
+		at([sx, 180 - 25.5 + 0.4, 0.62]) posts(0.75, 0.09, 92, 0.55);
+		at([middle - wide * 0.5, 155 - 0.5 + 17, -0.7]) cone(1.2, 1.3, 0);
+		for k in 0..4 {
+			at([sx, 180 - 25.5 + 0.5 + k * 50 / 3, 0.7]) box([0.8, 0.8, 1.4], 0);
+		}
+		for side in 0..2, k in 0..2 {
+			at([middle - wide * 0.5 + side * wide, 155 - 0.5 + 17 + k * 17, -3.35]) cylinder(4.3, 1.3);
+		}
+	}
+	paint(steel) at([sx, 180 - 25.5 + 0.5, 3.3]) cylinder(3.4, 0.07);
+	paint(globe) at([sx, 180 - 25.5 + 0.5, 5]) sphere(0.28);
+	for side in 0..2 {
+		paint(paving) at([middle - wide * 0.5 + walk * 0.5 + side * (wide - walk), 180, 0.075]) box([walk, 51, 0.15], 0);
+	}
+}
+
+shape riverside() {
+	paint(river) at([807 * 0.5 - 30, 180, -(4.5 + 8 - 0.3) * 0.5]) box([807 + 380, 50 - 0.3, 8 - 4.5 - 0.3], 0);
+	for column in 0..10 {
+		quays(column * 72 + 5 + select(column >= 5, 22, 0));
+	}
+	for column in 0..11 {
+		let lx = column * 72 + 5 + select(column >= 5, 22, 0);
+		bridge(lx - select(column == 5, 16, 5), select(column == 5, 32, 10));
+	}
+	for k in 0..3 {
+		draw();
+		let column = floor(u * 10);
+		draw();
+		let by = 155 + 8 + (205 - 8 - (155 + 8)) * u;
+		pick(2);
+		with at([column * 72 + 5 + select(column >= 5, 22, 0) + 31, by, -4.5]) turn(z, select(picked == 0, 0, pi)) {
+			paint(hull) at([0, 0, 0.4]) box([22, 5, 1.6], 1);
+			paint(smoked) at([1, 0, 1.6]) box([15, 4.2, 1.6], 0.4);
+		}
+	}
+}
+
+shape tram(place, heading) {
+	with at([place.x, place.y, 0]) turn(z, heading) {
+		for k in 0..3 {
+			paint(yellow) at([-10 + k * 10, 0, 1.9]) box([9.6, 2.4, 3], 0.3);
+		}
+		paint(smoked) at([-10, 0, 2.4]) box([9.2, 2.46, 1.1], 0.2);
+		paint(steel) at([0, 0, 3.8]) box([1.6, 0.1, 0.6], 0);
+	}
+}
+
+shape boulevard() {
+	paint(grass) at([371, 362.5, 0.075]) box([12, 725, 0.15], 0);
+	for k in 0..4 {
+		paint(steel) at([371 - 2.2 + k * 1.45, 362.5, 0.19]) box([0.08, 725, 0.08], 0);
+	}
+	for k in 0..2 {
+		paint(stripes) at([371 - 11 + k * 22, 362.5, 0]) box([0.15, 725, 0.2], 0);
+	}
+	for k in 0..81, side in [-1, 1] {
+		draw();
+		if u < 1 {
+			tree([371 + side * 4.6, 4 + k * 9, 0.15], 1.1);
+		}
+	}
+	for line in 0..10 {
+		for k in 0..3 {
+			paint(steel) at([371 - 5.6, line * 72 + 5 + 10 + k * 21.7, 3.2]) cylinder(6.4, 0.08);
+		}
+		paint(bulb) at([371 - 5.6, line * 72 + 5 + 10, 6.5]) sphere(0.3);
+	}
+	for lane in [-1, 1] {
+		draw();
+		let cy = 20 * u;
+		for k in 0..40 {
+			if cy < 725 {
+				let rest = cy - floor(cy / 72) * 72;
+				if abs(rest - 72) > 10 && rest > 10 {
+					pick(2);
+					car([371 + lane * (8 + select(picked == 0, 0, 3.4)), cy], -lane * pi * 0.5);
+				}
+				draw();
+				let cy = cy + (14 + (40 - 14) * u) / 0.7;
+			}
+		}
+	}
+	for k in 0..3 {
+		pick(2);
+		let side = select(picked == 0, -0.7, 0.7);
+		draw();
+		tram([371 + side, (0.1 + (0.9 - 0.1) * u) * 725], pi * 0.5);
+	}
+}
+
+paint(grass) cut {
+	merge {
+		at([371, 759.2, -5]) box([1638.4, 1638.4, 10], 0);
+		paint(asphalt) at([341, 332.5, -0.18]) box([802, 785, 0.4], 0);
+	}
+	paint(stone) at([371, 180, 0]) box([1142, 50, 16], 0);
+}
+
+for column in 0..10, line in 0..10 {
+	block(column, line);
+}
+
+mountains();
+riverside();
+boulevard();

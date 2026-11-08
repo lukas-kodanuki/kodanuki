@@ -1,0 +1,157 @@
+import "standard.sdf";
+
+render {
+	width     = 1280;
+	height    = 800;
+	tolerance = 2;
+}
+
+camera {
+	eye      = [0.4, -2.7, 1.9];
+	target   = [0.4, 0.3, 0.36];
+	fov      = 0.5;
+	aperture = 0.015;
+	focus    = 3.5;
+}
+
+grade {
+	exposure = 1.5;
+	curve    = filmic;
+}
+
+sky gradient {
+	zenith  = [0.012, 0.014, 0.022];
+	horizon = [0.030, 0.036, 0.058];
+	ground  = [0, 0, 0];
+}
+
+light quad {
+	at     = [-1.6, 1.2, 3.6];
+	along  = [0, 1.4, 0.6];
+	across = [3.2, 0, 0];
+	power  = [9, 9, 9];
+}
+
+light quad {
+	at     = [-3.4, -1.6, 0.4];
+	along  = [0.3, 1.2, 0];
+	across = [0, 0, 2.6];
+	power  = [3, 3.1, 3.5];
+}
+
+light quad {
+	at     = [4.2, -1.6, 0.4];
+	along  = [0, 0, 2.6];
+	across = [-0.3, 1.2, 0];
+	power  = [3.5, 3.3, 3];
+}
+
+light quad {
+	at     = [-2.1, -2.2, 4.8];
+	along  = [5, 0, 0];
+	across = [0, -1.4, -1];
+	power  = [22, 22, 22];
+}
+
+light quad {
+	at     = [-1.1, -3.6, 1.2];
+	along  = [0, 0, 1.4];
+	across = [3, 0, 0];
+	power  = [12, 12, 12];
+}
+
+light quad {
+	at     = [-0.6, -0.7, 4];
+	along  = [0, 2, 0];
+	across = [2, 0, 0];
+	power  = [10, 10, 10];
+}
+
+light sphere {
+	at     = [-1, -2.4, 3.6];
+	radius = 0.05;
+	power  = [60, 58, 56];
+}
+
+light sphere {
+	at     = [2.2, -1.9, 3.2];
+	radius = 0.05;
+	power  = [50, 50, 52];
+}
+
+light sphere {
+	at     = [-2.4, -0.6, 2.2];
+	radius = 0.05;
+	power  = [40, 38, 34];
+}
+
+light sphere {
+	at     = [3.2, 0.2, 2.4];
+	radius = 0.05;
+	power  = [34, 36, 42];
+}
+
+light sphere {
+	at     = [0.6, -3, 3.8];
+	radius = 0.05;
+	power  = [50, 50, 50];
+}
+
+light sphere {
+	at     = [0.4, 2.2, 3];
+	radius = 0.05;
+	power  = [40, 40, 44];
+}
+
+let flooring = plastic([0.004, 0.004, 0.004], roughness = 0.08);
+let sapphire = glass(refraction = 1.752, absorb = [1.021651, 0.653926, 0.030459], roughness = 0);
+
+let radius   = 0.5;
+let girdle   = 0.015;
+let share    = 0.56;
+let bezel    = 37 * pi / 180;
+let pavilion = 43 * pi / 180;
+let flats    = 16;
+let stretch  = 1.32;
+let gem      = [0.4, 0.3];
+let eye      = [0.4, -2.7, 1.9];
+let top      = girdle + radius * (1 - share) * sin(bezel) / cos(bezel);
+
+shape facet(normal, offset) {
+	let m = [normal.x / stretch, normal.y, normal.z];
+	plane(m / length(m), offset / length(m));
+}
+
+shape tilted(angle, around, height) {
+	let normal = [sin(angle) * cos(around), sin(angle) * sin(around), sign(height) * cos(angle)];
+	facet(normal, radius * sin(angle) + abs(height) * cos(angle));
+}
+
+shape stone() {
+	clip {
+		facet([0, 0, 1], top);
+		for k in 0..8 {
+			tilted(bezel, pi / 4 * k, girdle);
+			tilted(pavilion, pi / 4 * k, -girdle);
+		}
+
+		for k in 0..flats {
+			let around = 2 * pi * k / flats;
+			facet([cos(around), sin(around), 0], radius);
+		}
+	}
+}
+
+let seat   = [0, sin(pavilion), -cos(pavilion)];
+let lift   = radius * sin(pavilion) + girdle * cos(pavilion);
+let down   = [0, 0, -1];
+let axis   = normalize(cross(seat, down));
+let tip    = atan2(length(cross(seat, down)), dot(seat, down));
+let up     = [0, 0, 1];
+let table  = up * cos(tip) + cross(axis, up) * sin(tip) + axis * dot(axis, up) * (1 - cos(tip));
+let facing = atan2(eye.y - gem.y, eye.x - gem.x);
+let spin   = facing - atan2(table.y, table.x);
+
+paint(flooring) at([0, 0, -0.1]) box([12, 12, 0.2], 0);
+
+paint(sapphire) at([gem.x, gem.y, lift]) turn(z, spin) turn(axis, tip) stone();

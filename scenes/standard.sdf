@@ -1,0 +1,83 @@
+function sphere(r) {
+	return length(p) - r;
+}
+
+function box(size, r) {
+	let q = abs(p) - size / 2 + r;
+	return length(max(q, 0)) + min(max(q.x, max(q.y, q.z)), 0) - r;
+}
+
+function cylinder(h, r) {
+	let d = abs([length(p.xy), p.z]) - [r, h / 2];
+	return min(max(d.x, d.y), 0) + length(max(d, 0));
+}
+
+function capsule(a, b, r) {
+	let pa = p - a;
+	let ba = b - a;
+	let t  = clamp(dot(pa, ba) / dot(ba, ba), 0, 1);
+	return length(pa - ba * t) - r;
+}
+
+function sweep(a, b, ra, rb) {
+	let pa = p - a;
+	let ba = b - a;
+	let t  = clamp(dot(pa, ba) / dot(ba, ba), 0, 1);
+	return length(pa - ba * t) - mix(ra, rb, t);
+}
+
+function cone(height, base, tip) {
+	let reach = p.z + height / 2;
+	let taper = tip - base;
+	let side  = ((length(p.xy) - base) * height - reach * taper) / sqrt(height * height + taper * taper);
+	return max(max(-reach, reach - height), side);
+}
+
+function ellipsoid(radii) {
+	return (length(p / radii) - 1) * min(radii.x, min(radii.y, radii.z));
+}
+
+function torus(big, small) {
+	return length([length(p.xy) - big, p.z]) - small;
+}
+
+function plane(normal, offset) {
+	return dot(p, normal) - offset;
+}
+
+function revolve(points) {
+	let q = [length(p.xy), p.z];
+	let last = count(points) - 1;
+	let d = 1e30;
+	for i in 0..last {
+		let e = points[i + 1] - points[i];
+		let w = q - points[i];
+		let t = dot(w, e) / dot(e, e);
+		let b = w - e * clamp(t, 0, 1);
+		let across = (w.x * e.y - w.y * e.x) / length(e);
+		let d = min(d, select(t > 0 && t < 1, across * across, dot(b, b)));
+	}
+	let radius = points[0].x;
+	for i in 0..last {
+		let e = points[i + 1] - points[i];
+		if e.y == 0 {
+			let radius = radius + select(q.y >= points[i].y, e.x, 0);
+		}
+		if e.y != 0 {
+			let radius = radius + e.x * clamp((q.y - points[i].y) / e.y, 0, 1);
+		}
+	}
+	let outside = max(q.x - radius, max(points[0].y - q.y, q.y - points[last].y));
+	return select(outside > 0, 1, -1) * sqrt(d);
+}
+
+function checker(size) {
+	let h     = size / 2 - 0.001;
+	let count = floor(clamp(p.x, -h, h)) + floor(clamp(p.y, -h, h));
+	return count - 2 * floor(count / 2);
+}
+
+function lean(axis, onset, spread) {
+	let along = dot(n, axis);
+	return clamp((sqrt(max(1 - along * along, 0)) - onset) / spread, 0, 1);
+}

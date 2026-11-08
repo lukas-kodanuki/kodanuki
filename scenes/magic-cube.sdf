@@ -1,0 +1,72 @@
+import "standard.sdf";
+
+render {
+	width     = 1920;
+	height    = 1200;
+	tolerance = 2;
+}
+
+camera {
+	eye    = [3, 3, 4];
+	target = [0, 0, 2];
+	fov    = 0.8;
+}
+
+grade {
+	exposure = 1;
+	curve    = filmic;
+}
+
+sky gradient {
+	zenith  = [0.05, 0.13, 0.34];
+	horizon = [0.26, 0.40, 0.62];
+	ground  = [0.10, 0.09, 0.08];
+}
+
+light directional {
+	direction = [0.4, -0.5, 0.7];
+	power     = [2.4, 2.3, 2.1];
+}
+
+light sphere {
+	at     = [-2.2, -1.6, 3];
+	radius = 0.3;
+	power  = [18, 17, 15];
+}
+
+let black = plastic(#000000, roughness = 0.4);
+let size  = 0.5;
+let inset = 0.03;
+
+let colours = [
+	plastic(#FF5800, roughness = 0.7),
+	plastic(#C41E3A, roughness = 0.7),
+	plastic(#009E60, roughness = 0.7),
+	plastic(#0051BA, roughness = 0.7),
+	plastic(#FFFFFF, roughness = 0.7),
+	plastic(#FFD500, roughness = 0.7),
+];
+
+let normals = [
+	[1, 0, 0],
+	[-1, 0, 0],
+	[0, 1, 0],
+	[0, -1, 0],
+	[0, 0, 1],
+	[0, 0, -1],
+];
+
+shape cubie() {
+	paint(black) box([size, size, size], 0.05);
+	for f in 0..6 {
+		let n    = normals[f];
+		let tile = [size - inset, size - inset, size - inset] - abs(n) * (size - inset - 0.01);
+		paint(colours[f]) at(n * size / 2) box(tile, 0.05);
+	}
+}
+
+with at([0, 0, 2]) {
+	for x in 0..3, y in 0..3, z in 0..3 {
+		at(([x, y, z] - 1) * size) cubie();
+	}
+}

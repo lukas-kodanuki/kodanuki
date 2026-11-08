@@ -1,0 +1,40 @@
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: Latest
+UseTab: ForContinuationAndIndentation
+IndentWidth: 4
+TabWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 0
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortCaseExpressionOnASingleLine: true
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: None
+AlignTrailingComments: false
+AlignAfterOpenBracket: BlockIndent
+IndentCaseLabels: true
+NamespaceIndentation: None
+FixNamespaceComments: false
+Cpp11BracedListStyle: false
+SpaceBeforeCpp11BracedList: true
+PointerAlignment: Left
+InsertBraces: true
+SeparateDefinitionBlocks: Always
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtStartOfBlock: false
+  AtStartOfFile: false
+InsertNewlineAtEOF: true
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive
+BreakTemplateDeclarations: Yes
+AllowAllArgumentsOnNextLine: false
+BinPackArguments: true
+BracedInitializerIndentWidth: 4

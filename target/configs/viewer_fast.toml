@@ -1,0 +1,44 @@
+[settings]
+width = 1920
+height = 1200
+threads = 12
+faces = true
+smooth_glass = "exact"
+
+[viewer]
+internal_width = 480
+internal_height = 300
+
+[extras]
+build_correct_cut_long_programs = true
+build_correct_face_slabs = true
+build_correct_faced_hits = true
+build_correct_shared_coefficients = true
+build_correct_shared_subtrees = true
+build_correct_split_beside_finer = true
+detail_correct_focus_on_view = true
+detail_correct_pilot = true
+detail_correct_split_crowded_leaves = true
+detail_correct_split_hidden_primitives = true
+execution_correct_waves = true
+feature_biased_clouds = true
+feature_biased_path_rules = true
+feature_correct_absorption = true
+feature_correct_atmosphere = true
+feature_correct_dispersion = true
+feature_correct_scattering = true
+feature_correct_sky_layers = true
+feature_mixed_coats = true
+reconstruction_biased_atrous = true
+reconstruction_biased_temporal = true
+reconstruction_biased_upsample = true
+reconstruction_biased_upscale = true
+sampler_correct_each_lamp_first = true
+sampler_correct_glowing_surfaces = true
+sampler_correct_highlight_guide = true
+sampler_correct_sky_map = true
+sampler_correct_sobol = true
+sampler_correct_toward_mirrors = true
+stopping_consistent_confidence_interval = true
+strategy_correct_connect = false
+strategy_correct_join = false

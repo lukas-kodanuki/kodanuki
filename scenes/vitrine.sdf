@@ -1,0 +1,71 @@
+import "standard.sdf";
+
+render {
+	width     = 1280;
+	height    = 800;
+	tolerance = 2;
+	seed      = 24301;
+	far       = 9;
+}
+
+camera {
+	eye    = [3.9, -6.3, 2.9];
+	target = [0, 0, 1.35];
+	fov    = 0.66;
+}
+
+grade {
+	exposure = 0.85;
+	curve    = filmic;
+}
+
+sky gradient {
+	zenith  = [0.03, 0.04, 0.07];
+	horizon = [0.06, 0.06, 0.09];
+	ground  = [0.02, 0.02, 0.02];
+}
+
+light sphere {
+	at     = [3.4, -1.2, 1.9];
+	radius = 0.3;
+	power  = [34, 6, 8];
+}
+
+light sphere {
+	at     = [-3.3, -1.6, 1.1];
+	radius = 0.26;
+	power  = [5, 26, 12];
+}
+
+light sphere {
+	at     = [-2.6, 2.9, 2.4];
+	radius = 0.3;
+	power  = [6, 10, 34];
+}
+
+light sphere {
+	at     = [2.3, 3.1, 1.4];
+	radius = 0.24;
+	power  = [30, 22, 6];
+}
+
+light sphere {
+	at     = [0, -3.4, 3.2];
+	radius = 0.28;
+	power  = [24, 8, 26];
+}
+
+let flooring = plastic([0.2, 0.2, 0.22], roughness = 0.32);
+let stand    = matte([0.13, 0.13, 0.15]);
+let pane     = glass(refraction = 1.52, absorb = [0.105361, 0.040822, 0.061875], roughness = 0, dispersion = 0.006);
+let gold     = metal([1, 0.77, 0.34], roughness = 0.11);
+
+paint(flooring) plane([0, 0, 1], 0);
+paint(stand) at([0, 0, 0.15]) box([3, 3, 0.3], 0);
+
+paint(pane) at([0, 0, 1.5]) cut {
+	box([2.4, 2.4, 2.4], 0.05);
+	box([2.22, 2.22, 2.22], 0);
+}
+
+paint(gold) at([0, 0, 1.1]) sphere(0.72);

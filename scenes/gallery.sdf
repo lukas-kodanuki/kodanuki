@@ -1,0 +1,101 @@
+import "standard.sdf";
+
+render {
+	width     = 1920;
+	height    = 1200;
+	tolerance = 2;
+}
+
+camera {
+	eye    = [6.2, -13, 5.6];
+	target = [0, 1.2, 1];
+	fov    = 0.55;
+}
+
+grade {
+	exposure = 1;
+	curve    = filmic;
+}
+
+sky gradient {
+	zenith  = [0.02, 0.03, 0.07];
+	horizon = [0.07, 0.08, 0.12];
+	ground  = [0.01, 0.01, 0.02];
+}
+
+light sphere {
+	at     = [8.5, -3, 7.5];
+	radius = 0.45;
+	power  = [290, 262, 224];
+}
+
+light quad {
+	at     = [-8, -2.2, 0.3];
+	along  = [0, 5, 0];
+	across = [0, 0, 4.2];
+	power  = [34, 42, 62];
+}
+
+light sphere {
+	at     = [1.2, 7, 5.4];
+	radius = 1.7;
+	power  = [120, 108, 88];
+}
+
+let flooring = plastic([0.24, 0.25, 0.28], roughness = 0.3);
+let ink      = matte([0.09, 0.10, 0.13]);
+let chalk    = matte([0.80, 0.77, 0.71]);
+let steel    = metal([0.94, 0.95, 0.97], roughness = 0.05);
+let mirror   = metal([0.95, 0.95, 0.97], roughness = 0.0841);
+let gold     = metal([0.95, 0.72, 0.32], roughness = 0.17);
+let copper   = metal([0.95, 0.62, 0.50], roughness = 0.33);
+let lacquer  = plastic([0.72, 0.09, 0.14], roughness = 0.09);
+let jade     = plastic([0.16, 0.62, 0.44], roughness = 0.1834);
+let amber    = plastic([0.92, 0.58, 0.10], roughness = 0.253);
+let pane     = glass(refraction = 1.52, absorb = [0.03, 0.01, 0.05], roughness = 0.099);
+let warmth   = ramp(lean([0, 0, 1], 0.1, 0.8), [0.96, 0.36, 0.10], [0.14, 0.26, 0.86]);
+let iris     = plastic(warmth, roughness = 0.1291);
+
+let BALLS = [
+	[-0.7, -1.7, 0.45],
+	[3, 1.9, 0.3],
+];
+
+let LACQUER = [
+	[-5.1, 1, 0.95],
+	[-4.1, 1.7, 0.7],
+	[-5.6, 2, 0.55],
+];
+
+paint(flooring) at([0, 0, -0.5]) box([28, 28, 1], 0);
+
+paint(ink) at([-0.6, 1.6, 0.16]) box([5.2, 5.2, 0.32], 0);
+paint(steel) capsule([-0.6, 1.6, 0.32], [-0.6, 1.6, 1.7], 0.09);
+paint(gold) at([-0.6, -1.394075, 2.288898]) turn(x, 68 * pi / 180) torus(1.28, 0.38);
+paint(steel) at([2.15, 1.6, 0.6]) turn(y, pi / 2) torus(0.62, 0.09);
+
+paint(pane) at([-3.4, -1.8, 1.1]) sphere(1.1);
+paint(mirror) at([4.2, 0.6, 1.6]) cone(3.2, 0.78, 0.04);
+paint(jade) at([0.9, 5.2, 0.9]) ellipsoid([1.4, 0.85, 0.9]);
+paint(copper) capsule([2.2, -4.6, 0.28], [4.5, -3.3, 0.28], 0.28);
+paint(amber) at([1.8, -2.4, 0.3]) torus(0.95, 0.3);
+
+for ball in BALLS {
+	paint(steel) at(ball) sphere(ball.z);
+}
+
+paint(lacquer) merge(0.35) {
+	for ball in LACQUER {
+		at(ball) sphere(ball.z);
+	}
+}
+
+paint(iris) at([4.3, 4.8, 0]) clip {
+	sphere(1.45);
+	at([0, 0, 1.45]) box([3.2, 3.2, 2.9], 0);
+}
+
+paint(chalk) cut {
+	at([-5.244486, 2.283717, 0.88]) turn(z, pi / 6) box([1.76, 1.76, 1.76], 0);
+	at([-2.8, 4, 1.66]) sphere(0.98);
+}
