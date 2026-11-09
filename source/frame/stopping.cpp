@@ -12,6 +12,7 @@ constexpr double tightestTolerance = 0.5;
 constexpr double leastCeiling      = 8;
 constexpr double mostCeiling       = 4096;
 constexpr double deepestStride     = 8;
+constexpr double adaptiveRoom      = 4;
 const double mostEffort            = std::pow(2.0, 0.66);
 
 double effortOf(double tolerance) {
@@ -23,7 +24,8 @@ Effort effortFor(double tolerance) {
 	const double effort = tolerance > 0 ? effortOf(tolerance) : 1.0;
 	const int stride    = int(std::lround(1 + (deepestStride - 1) * effort));
 	const int batch     = stride * stride;
-	const int ceiling   = int(std::lround(leastCeiling * std::pow(mostCeiling / leastCeiling, effort)));
+	const double room   = tolerance > 0 ? adaptiveRoom : 1;
+	const int ceiling   = int(std::lround(room * leastCeiling * std::pow(mostCeiling / leastCeiling, effort)));
 	return Effort {
 		.samples = std::max(batch, ceiling),
 		.batch   = batch,

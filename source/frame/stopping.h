@@ -181,10 +181,11 @@ Estimate foldedSample(const Estimate& estimate, const Colour& colour, int batch)
  *
  * One effort e from 0 to 0.66 power of 2 sets all three: the tolerance
  * is 62.5 x (0.5 / 62.5)^e, a batch holds the square of round(1 + 7e)
- * samples and the ceiling is 8 x 512^e samples, at least a batch. The
+ * samples and the ceiling is 32 x 512^e samples, at least a batch. The
  * effort is read back from the tolerance, so a tolerance of 2 asks for
- * batches of 36 and at most 683 samples. A tolerance of zero or less
- * reads as the effort 1: batches of 64 and at most 4096 samples.
+ * batches of 36 and at most 2732 samples. A tolerance of zero or less
+ * reads as the effort 1 with the ceiling 8 x 512^e: batches of 64 and
+ * at most 4096 samples.
  *
  * @param tolerance The noise a pixel may keep, in steps of a byte.
  */

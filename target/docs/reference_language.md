@@ -348,8 +348,8 @@ from what the trials of the eight pixels around it want, in whole
 batches, at most `samples`. Where `samples` or `batch` is not given,
 the tolerance sets it: one effort e = log(62.5 / tolerance) / log(125),
 from 0 up to 2^0.66, gives batches of round(1 + 7e)^2 samples and at
-most 8 x 512^e samples a pixel, so the default tolerance of 2 asks for
-batches of 36 and at most 683 samples (a tolerance of 0 or less: 64
+most 32 x 512^e samples a pixel, so the default tolerance of 2 asks for
+batches of 36 and at most 2732 samples (a tolerance of 0 or less: 64
 and 4096). The region the tree is built over is found by sampling the
 scene from the camera out to `far`. Shapes that never end, such as a
 ground plane, are cut off at `far`.
