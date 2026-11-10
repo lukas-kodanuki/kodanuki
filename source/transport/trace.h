@@ -49,6 +49,11 @@ enum class WalkPhase : std::uint8_t {
 	 */
 	Lighting,
 	/**
+	 * It stands lit on the first vertex its group shares and waits for
+	 * branchedFrom() to take each sample of the group on from there.
+	 */
+	Branching,
+	/**
 	 * It has ended.
 	 */
 	Done,
@@ -75,6 +80,15 @@ struct PixelSample {
 	 * The sample's place in the pixel's whole run.
 	 */
 	std::uint32_t index;
+	/**
+	 * The place of its group in the pixel's run of groups, its index
+	 * for a sample alone.
+	 */
+	std::uint32_t group;
+	/**
+	 * How many samples share its first vertex, one for a sample alone.
+	 */
+	std::uint32_t branches;
 };
 
 /**
@@ -581,6 +595,57 @@ LineStep lineStepped(const Tracing& tracing, const LineHit& met);
  * @param answer The ray's hit and the registers.
  */
 void walkAnswered(const Tracing& tracing, Walk& walk, const Answer& answer);
+
+/**
+ * Send one sample of a group on its way from the first vertex the
+ * group shares, in place (rule 46).
+ *
+ * The first sample of a group walks alone to that vertex, lights it and
+ * waits there (WalkPhase::Branching). Every sample of the group, the
+ * first included, then leaves it by a direction of its own: it takes
+ * the waiting walk's path and companions and draws by its own index.
+ * The first sample keeps what the shared stretch gathered, once for
+ * each sample of the group, and the others start with nothing, so the
+ * mean over the group is the mean of as many samples alone. The
+ * weighing counts the first vertex's aims once a group (sharedAim()).
+ *
+ * @param tracing What the transport reads.
+ * @param stem The group's first sample, waiting on the shared vertex.
+ * @param index The sample's place in the pixel's whole run.
+ * @param branch The sample's walk, which may be the stem itself for
+ * the group's first sample.
+ */
+void branchedFrom(const Tracing& tracing, const Walk& stem, std::uint32_t index, Walk& branch);
+
+/**
+ * Return what a walk that ended brought, as a colour.
+ *
+ * The first sample of a group that ended before its first vertex, or on
+ * it, brings what it gathered once for each sample of the group; the
+ * group's other samples then bring nothing.
+ *
+ * @param walk The walk, done.
+ */
+Colour walkColour(const Walk& walk);
+
+/**
+ * Return the colour of what a group's samples share: what its first
+ * sample gathered up to the first vertex, once for each sample of the
+ * group. The stopper reads its spread apart from the rest.
+ *
+ * @param walk The group's first sample: waiting on the shared vertex,
+ * or done without having branched.
+ */
+Colour sharedColour(const Walk& walk);
+
+/**
+ * Walk a walk on until it ends or waits to be branched: the step
+ * machine's scalar loop, each ray traced by intersect() as it is asked.
+ *
+ * @param tracing What the transport reads.
+ * @param walk The walk.
+ */
+void walkedOut(const Tracing& tracing, Walk& walk);
 
 /**
  * Trace one sample to its end and return what it brought: the step

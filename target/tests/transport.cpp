@@ -296,6 +296,8 @@ LightPath standingLightPath(const JoinProbe& probe, std::vector<double>& registe
 	const PathNumbers numbers = {
 		.stream    = 7,
 		.index     = 0,
+		.group     = 0,
+		.branches  = 1,
 		.sequenced = false,
 	};
 

@@ -347,15 +347,25 @@ of two batches, whose batch means give its noise, and its count is set
 from what the trials of the eight pixels around it want, in whole
 batches, at most `samples`. Where `samples` or `batch` is not given,
 the tolerance sets it: one effort e = log(62.5 / tolerance) / log(125),
-from 0 up to 2^0.66, gives batches of round(1 + 7e)^2 samples and at
-most 32 x 512^e samples a pixel, so the default tolerance of 2 asks for
-batches of 36 and at most 2732 samples (a tolerance of 0 or less: 64
-and 4096). The region the tree is built over is found by sampling the
+from 0 up to 2^0.66, gives batches of round(1 + 7e)^2 samples, rounded
+up to a multiple of 8, and at most 32 x 512^e samples a pixel, so the
+default tolerance of 2 asks for batches of 40 and at most 2732 samples
+(a tolerance of 0 or less: 64 and 4096).
+`split` is how many samples of a pixel share a first vertex: a group's
+first sample traces the camera ray and lights the first surface once,
+and every sample of the group leaves it by a direction of its own. The
+mean is that of as many samples alone; what changes is where the work
+goes. 1, 2, 4 or 8 holds for every pixel and must divide `batch`; 0,
+the default, lets the stopping choose: the trial draws groups of 2,
+and each pixel's count pass takes the power of two up to 8 that its
+neighbours' trials say costs least, from how their noise parts between
+the shared stretch and the rest (a fixed count without a trial takes
+1). A pixel's count is cut to whole groups. The region the tree is built over is found by sampling the
 scene from the camera out to `far`. Shapes that never end, such as a
 ground plane, are cut off at `far`.
 
 The command line overrides every `render` field but `far`: `--size w
-h`, `--tolerance t`, `--samples n`, `--batch n`, `--surfaces n`,
+h`, `--tolerance t`, `--samples n`, `--batch n`, `--split n`, `--surfaces n`,
 `--collisions n` and `--seed n` (surfaces and collisions below 1 are
 taken as 1). `make render` draws the scene with the config's settings
 into `output/`; rule 51 lists the settings a config takes.

@@ -1764,8 +1764,12 @@ void checkFields(const Fields& fields, const std::vector<std::string>& known) {
 	}
 }
 
+bool splitNamed(int split) {
+	return split == 0 || split == 1 || split == 2 || split == 4 || split == 8;
+}
+
 void readRender(Shot& shot, const Fields& fields) {
-	checkFields(fields, { "width", "height", "tolerance", "seed", "far", "samples", "batch", "surfaces", "collisions" });
+	checkFields(fields, { "width", "height", "tolerance", "seed", "far", "samples", "batch", "split", "surfaces", "collisions" });
 	readInt(fields, "width", shot.render.width);
 	readInt(fields, "height", shot.render.height);
 	readFloat(fields, "tolerance", shot.render.tolerance);
@@ -1773,6 +1777,7 @@ void readRender(Shot& shot, const Fields& fields) {
 	readFloat(fields, "far", shot.render.far);
 	readInt(fields, "samples", shot.render.samples);
 	readInt(fields, "batch", shot.render.batch);
+	readInt(fields, "split", shot.render.split);
 	readInt(fields, "surfaces", shot.render.surfaces);
 	readInt(fields, "collisions", shot.render.collisions);
 	if (shot.render.surfaces < 1) {
@@ -1780,6 +1785,9 @@ void readRender(Shot& shot, const Fields& fields) {
 	}
 	if (shot.render.collisions < 1) {
 		fail(fields.setting.location, "a render's collisions must be at least one");
+	}
+	if (!splitNamed(shot.render.split)) {
+		fail(fields.setting.location, "a render's split must be 0, 1, 2, 4 or 8");
 	}
 }
 
@@ -2531,6 +2539,7 @@ Render defaultRender() {
 		.far        = 1000,
 		.samples    = 0,
 		.batch      = 0,
+		.split      = 0,
 		.surfaces   = 10,
 		.collisions = 256,
 	};

@@ -396,16 +396,38 @@ bool sobolNet(std::uint64_t stream, std::uint64_t dimension, int k) {
 	return true;
 }
 
+bool sobolEven(std::uint64_t stream, std::uint64_t dimension, int k) {
+	const std::uint32_t count = std::uint32_t(1) << k;
+	std::vector<int> held(count, 0);
+	for (std::uint32_t i = 0; i < count; ++i) {
+		const math::Key key = {
+			.stream     = stream,
+			.index      = i,
+			.coordinate = dimension,
+		};
+
+		held[std::uint32_t(sobolNumber(key) * double(count))] += 1;
+	}
+	return std::all_of(held.begin(), held.end(), [](int one) {
+		return one == 1;
+	});
+}
+
 void checkSobolNets() {
 	bool nets = true;
+	bool even = true;
 	for (const std::uint64_t stream : { 0x0123456789ABCDEFULL, 0xFEDCBA9876543210ULL, 0x5555AAAA33331111ULL }) {
-		for (std::uint64_t dimension = 0; dimension < sobolDimensions; dimension += 2) {
+		for (int k = 1; k <= 8; ++k) {
+			nets = nets && sobolNet(stream, 0, k) && sobolNet(stream, sharedCoordinates, k);
+		}
+		for (std::uint64_t dimension = 0; dimension < sobolDimensions; ++dimension) {
 			for (int k = 1; k <= 8; ++k) {
-				nets = nets && sobolNet(stream, dimension, k);
+				even = even && sobolEven(stream, dimension, k);
 			}
 		}
 	}
-	check(nets, "every power-of-two prefix of a Sobol pair holds one point per elementary interval");
+	check(nets, "every power-of-two prefix of the first Sobol pair of the shared and of the own coordinates holds one point per elementary interval");
+	check(even, "every power-of-two prefix of every Sobol coordinate holds one point per interval");
 }
 
 math::Vector binDirection(const SphereBins& bins, int bin, const math::UnitPair& within) {

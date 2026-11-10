@@ -190,6 +190,17 @@ struct PathNumbers {
 	 */
 	std::uint32_t index;
 	/**
+	 * The place of the sample's group in its pixel's run of groups: the
+	 * samples that share a first vertex draw the pixel, the lens, the
+	 * wavelengths and that vertex's lights by it. A sample alone, or a
+	 * light path, holds its index.
+	 */
+	std::uint32_t group;
+	/**
+	 * How many samples share the first vertex, one for a sample alone.
+	 */
+	std::uint32_t branches;
+	/**
 	 * Whether a sequence member may give the coordinates: eye paths yes,
 	 * light paths no.
 	 */
@@ -324,6 +335,10 @@ struct Path {
 	 * What names its numbers.
 	 */
 	PathNumbers numbers;
+	/**
+	 * Whether the path left its first vertex as one branch of its group.
+	 */
+	bool branched;
 };
 
 /**
@@ -648,6 +663,16 @@ Coordinate coordinateOf(int event, Draw draw);
  * @param coordinate The coordinate.
  */
 std::uint64_t dimensionOf(const Coordinate& coordinate);
+
+/**
+ * Return whether the samples that share a first vertex share a
+ * coordinate: the pixel, the lens and what the first vertex aims at
+ * its lights with. They draw it by their group, every other one by
+ * their own index.
+ *
+ * @param coordinate The event and the role.
+ */
+bool sharedDraw(const Coordinate& coordinate);
 
 /**
  * Return the ray that leaves a vertex along a direction.

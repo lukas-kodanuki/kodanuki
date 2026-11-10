@@ -182,6 +182,8 @@ LightWalk passWalkStarted(const Tracing& tracing, std::uint32_t index) {
 	const PathNumbers numbers = {
 		.stream    = math::mixedBits(tracing.seed) ^ math::mixedBits(lightPassTag),
 		.index     = index,
+		.group     = index,
+		.branches  = 1,
 		.sequenced = false,
 	};
 
@@ -203,6 +205,8 @@ LightWalk leadStarted(const Tracing& tracing, const Path& path) {
 	const PathNumbers numbers = {
 		.stream    = math::mixedBits(path.numbers.stream ^ leadTag),
 		.index     = path.numbers.index,
+		.group     = path.numbers.index,
+		.branches  = 1,
 		.sequenced = false,
 	};
 
@@ -219,6 +223,8 @@ LightWalk idleLead() {
 	const PathNumbers numbers = {
 		.stream    = 0,
 		.index     = 0,
+		.group     = 0,
+		.branches  = 1,
 		.sequenced = false,
 	};
 

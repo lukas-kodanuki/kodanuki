@@ -489,9 +489,11 @@ int recordsOff(const Tracing& tracing, int samples) {
 	int off = 0;
 	for (int k = 0; k < samples; ++k) {
 		const PixelSample sample = {
-			.x     = (k * 37) % tracing.lens.width,
-			.y     = (k * 23) % tracing.lens.height,
-			.index = std::uint32_t(k),
+			.x        = (k * 37) % tracing.lens.width,
+			.y        = (k * 23) % tracing.lens.height,
+			.index    = std::uint32_t(k),
+			.group    = std::uint32_t(k),
+			.branches = 1,
 		};
 
 		const Ray ray       = startedPath(tracing, sample).ray;

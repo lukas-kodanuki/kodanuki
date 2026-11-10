@@ -47,6 +47,16 @@ struct StrategyCounts {
 };
 
 /**
+ * Return the counts at the first vertex of a group of samples: its
+ * aims run once for the whole group while every sample draws a
+ * direction of its own, so each sample counts one aim in as many.
+ *
+ * @param counts The strategies' counts.
+ * @param branches How many samples share the vertex.
+ */
+StrategyCounts sharedAim(const StrategyCounts& counts, std::uint32_t branches);
+
+/**
  * How many vertices of each kind a path stands on, the last included.
  */
 struct VertexCounts {

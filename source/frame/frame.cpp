@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -99,6 +101,8 @@ PixelJob trialJob(const TileWork& work, int x, int y) {
 		.count = work.trial.samples,
 		.start = emptyEstimate(),
 		.batch = work.stopping.batch,
+		.split = work.trial.split,
+		.group = 0,
 	};
 }
 
@@ -113,13 +117,16 @@ PixelJob countJob(const TileWork& work, int x, int y) {
 
 	const std::size_t pixel = std::size_t(y) * std::size_t(trial.width) + std::size_t(x);
 	const bool tried        = trial.samples > 0;
+	const int split         = splitFor(work.stopping, query);
 	return PixelJob {
 		.x     = x,
 		.y     = y,
 		.first = trial.samples,
-		.count = samplesFor(work.stopping, query) - trial.samples,
+		.count = (samplesFor(work.stopping, query) - trial.samples) / split * split,
 		.start = tried ? trialStart(trial, pixel) : emptyEstimate(),
 		.batch = work.stopping.batch,
+		.split = split,
+		.group = trial.samples / trial.split,
 	};
 }
 
@@ -132,6 +139,8 @@ PixelJob stepJob(const TileWork& work, int x, int y) {
 		.count = 1,
 		.start = work.earlier.empty() ? emptyEstimate() : work.earlier[pixel],
 		.batch = work.stopping.batch,
+		.split = 1,
+		.group = int(work.index),
 	};
 }
 
@@ -157,6 +166,7 @@ TileResult emptyResult(const Tile& tile) {
 		.rgb       = {},
 		.wanted    = {},
 		.totals    = {},
+		.spreads   = {},
 		.estimates = {},
 		.records   = {},
 		.samples   = 0,
@@ -172,6 +182,7 @@ void judgedPixel(const TileWork& work, const Estimate& estimate, std::size_t pix
 
 	result.wanted.push_back(wantedSamples(work.stopping, judged));
 	result.totals.push_back(estimate.total);
+	result.spreads.push_back(splitSpread(estimate, work.stopping.batch, work.trial.split));
 }
 
 Colour pixelColour(const Estimate& estimate, const Prepared& prepared, std::size_t pixel) {
@@ -237,15 +248,25 @@ Image placedTiles(const std::vector<TileResult>& results, int width, int height)
 	return placed;
 }
 
+int fittedSplit(int split, int batch) {
+	if (split > 0 && batch % split != 0) {
+		std::fprintf(stderr, "kodanuki: a split of %d needs batches of a multiple of it, not %d\n", split, batch);
+		std::exit(1);
+	}
+	return split;
+}
+
 Stopping frameStopping(const FrameInput& input) {
 	const Render& render = input.shot.render;
 	const Effort effort  = effortFor(render.tolerance);
+	const int batch      = render.batch > 0 ? render.batch : effort.batch;
 	return Stopping {
 		.member    = input.stopping,
 		.samples   = render.samples > 0 ? render.samples : effort.samples,
-		.batch     = render.batch > 0 ? render.batch : effort.batch,
+		.batch     = batch,
 		.tolerance = double(render.tolerance),
 		.grade     = input.shot.grade,
+		.split     = fittedSplit(render.split, batch),
 	};
 }
 
@@ -345,6 +366,7 @@ void judgedTile(const TileResult& result, Trial& trial) {
 		const std::size_t pixel = pixelOf(result.tile, k, trial.width);
 		trial.wanted[pixel]     = result.wanted[k];
 		trial.totals[pixel]     = result.totals[k];
+		trial.spreads[pixel]    = result.spreads[k];
 	}
 }
 
@@ -355,6 +377,8 @@ Trial noTrial(const Lens& lens, int samples) {
 		.height  = lens.height,
 		.wanted  = {},
 		.totals  = {},
+		.split   = 1,
+		.spreads = {},
 	};
 }
 
@@ -363,6 +387,7 @@ Trial judgedTrial(const std::vector<TileResult>& results, const Trial& drawn) {
 	Trial trial              = drawn;
 	trial.wanted.assign(pixels, 0.0f);
 	trial.totals.assign(pixels, Colour { 0, 0, 0 });
+	trial.spreads.assign(pixels, SplitSpread { 0, 0 });
 	for (const TileResult& result : results) {
 		judgedTile(result, trial);
 	}
@@ -370,10 +395,11 @@ Trial judgedTrial(const std::vector<TileResult>& results, const Trial& drawn) {
 }
 
 Trial frameTrial(const TiledRun& run, const std::vector<Tile>& tiles) {
-	const Trial drawn = noTrial(run.tracing.lens, trialSamples(run.stopping));
+	Trial drawn = noTrial(run.tracing.lens, trialSamples(run.stopping));
 	if (drawn.samples <= 0) {
 		return drawn;
 	}
+	drawn.split = trialSplit(run.stopping);
 
 	const std::vector<Estimate> none = {};
 

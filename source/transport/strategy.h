@@ -323,6 +323,18 @@ Lines noLines();
 StrategyCounts countsOf(const Strategies& strategies);
 
 /**
+ * Return the counts a path's weighing reads for the aims of one of its
+ * vertices: countsOf() the tracing's strategies, and sharedAim() of
+ * them at the first vertex, which a group of samples shares.
+ *
+ * @param tracing What the transport reads.
+ * @param path The path.
+ * @param vertex How many vertices the path scattered from before the
+ * one that aims.
+ */
+StrategyCounts aimCounts(const Tracing& tracing, const Path& path, int vertex);
+
+/**
  * Return whether eye walks lead with a light subpath: Connect is on and
  * some lamp has a share.
  *

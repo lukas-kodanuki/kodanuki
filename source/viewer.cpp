@@ -99,7 +99,7 @@ void viewedLoop(const Viewing& viewing) {
 
 int main(int argc, char** argv) {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: kodanuki_view scene.sdf [--size w h] [--seed n] [--tolerance t] [--samples n] [--batch n] [--surfaces n] [--collisions n] [--threads n] [--use key=value ...] [--region lx ly lz hx hy hz] [--least e] [--depth n] [--internal w h]\n");
+		std::fprintf(stderr, "usage: kodanuki_view scene.sdf [--size w h] [--seed n] [--tolerance t] [--samples n] [--batch n] [--split n] [--surfaces n] [--collisions n] [--threads n] [--use key=value ...] [--region lx ly lz hx hy hz] [--least e] [--depth n] [--internal w h]\n");
 		return 1;
 	}
 

@@ -23,15 +23,9 @@ void launched(Wave& wave, std::uint32_t slot) {
 	PixelSlot& held     = wave.slots[slot];
 	const PixelJob& job = wave.jobs[held.job];
 	const int count     = std::min(slotSamples, job.first + job.count - held.launched);
-	for (int k = 0; k < count; ++k) {
-		const PixelSample sample = {
-			.x     = job.x,
-			.y     = job.y,
-			.index = std::uint32_t(held.launched + k),
-		};
-
+	for (int k = 0; k < count; k += job.split) {
 		const std::uint32_t token = slot * std::uint32_t(slotSamples) + std::uint32_t(k);
-		walkRestarted(wave.tracing, sample, wave.walks[token]);
+		walkRestarted(wave.tracing, groupSample(job, held.launched - job.first + k), wave.walks[token]);
 		queuedWalk(wave, token);
 	}
 	held.launched += count;
@@ -79,7 +73,14 @@ void foldedSlot(Wave& wave, std::uint32_t slot) {
 	PixelSlot& held     = wave.slots[slot];
 	const PixelJob& job = wave.jobs[held.job];
 	for (int k = 0; k < held.batch; ++k) {
-		held.estimate = foldedSample(held.estimate, wave.colours[slot * std::uint32_t(slotSamples) + std::uint32_t(k)], job.batch);
+		const std::uint32_t token = slot * std::uint32_t(slotSamples) + std::uint32_t(k);
+
+		const Sampled drawn = {
+			.colour = wave.colours[token],
+			.shared = wave.shared[token],
+		};
+
+		held.estimate = foldedSample(held.estimate, drawn, job.batch);
 	}
 	if (held.launched < job.first + job.count) {
 		launched(wave, slot);
@@ -92,6 +93,46 @@ void foldedSlot(Wave& wave, std::uint32_t slot) {
 	takenJob(wave, slot);
 }
 
+void settled(Wave& wave, std::uint32_t token, int count) {
+	const std::uint32_t slot = token / std::uint32_t(slotSamples);
+	wave.slots[slot].owing -= count;
+	if (wave.slots[slot].owing == 0) {
+		foldedSlot(wave, slot);
+	}
+}
+
+void endedWalk(Wave& wave, std::uint32_t token) {
+	wave.colours[token] = walkColour(wave.walks[token]);
+	settled(wave, token, 1);
+}
+
+void endedAlone(Wave& wave, std::uint32_t token) {
+	const Walk& walk             = wave.walks[token];
+	const std::uint32_t branches = walk.path.numbers.branches;
+	std::fill_n(wave.colours.begin() + token, branches, Colour { 0, 0, 0 });
+	std::fill_n(wave.shared.begin() + token, branches, Colour { 0, 0, 0 });
+	wave.colours[token] = walkColour(walk);
+	wave.shared[token]  = wave.colours[token];
+	settled(wave, token, int(branches));
+}
+
+void branchedGroup(Wave& wave, std::uint32_t token) {
+	Walk& stem                   = wave.walks[token];
+	const std::uint32_t branches = stem.path.numbers.branches;
+	std::fill_n(wave.shared.begin() + token, branches, Colour { 0, 0, 0 });
+	wave.shared[token] = sharedColour(stem);
+	for (std::uint32_t k = branches; k-- > 0;) {
+		branchedFrom(wave.tracing, stem, stem.path.numbers.index + k, wave.walks[token + k]);
+	}
+	for (std::uint32_t k = 0; k < branches; ++k) {
+		if (wave.walks[token + k].phase == WalkPhase::Done) {
+			endedWalk(wave, token + k);
+			continue;
+		}
+		queuedWalk(wave, token + k);
+	}
+}
+
 void answeredWalk(Wave& wave, std::uint32_t token, const Hit& hit) {
 	const Answer answer = {
 		.hit       = hit,
@@ -100,16 +141,19 @@ void answeredWalk(Wave& wave, std::uint32_t token, const Hit& hit) {
 
 	walkAnswered(wave.tracing, wave.walks[token], answer);
 	const Walk& walk = wave.walks[token];
+	if (walk.phase == WalkPhase::Branching) {
+		branchedGroup(wave, token);
+		return;
+	}
 	if (walk.phase != WalkPhase::Done) {
 		queuedWalk(wave, token);
 		return;
 	}
-	wave.colours[token]      = colourOf(walk.path.wavelengths, walk.path.radiance);
-	const std::uint32_t slot = token / std::uint32_t(slotSamples);
-	wave.slots[slot].owing -= 1;
-	if (wave.slots[slot].owing == 0) {
-		foldedSlot(wave, slot);
+	if (!walk.path.branched) {
+		endedAlone(wave, token);
+		return;
 	}
+	endedWalk(wave, token);
 }
 
 void answeredPacket(Wave& wave, const Packet& packet) {
@@ -170,6 +214,7 @@ Wave startedWave(const Tracing& tracing, const std::vector<PixelJob>& jobs, cons
 		.jobs      = jobs,
 		.walks     = reusedWalks(),
 		.colours   = std::vector<Colour>(walks),
+		.shared    = std::vector<Colour>(walks),
 		.slots     = std::vector<PixelSlot>(slots, idleSlot()),
 		.queues    = emptyQueues(std::size_t(pathsInFlight / 8)),
 		.estimates = std::vector<Estimate>(jobs.size()),

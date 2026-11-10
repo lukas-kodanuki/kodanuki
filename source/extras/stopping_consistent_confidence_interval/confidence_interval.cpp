@@ -159,12 +159,62 @@ Around neighboursWanted(const CountQuery& query) {
 	return around;
 }
 
+int confidenceTrialSplit(const Stopping& stopping) {
+	return std::min(firstSplit, splitCeiling(stopping.batch));
+}
+
+SplitSpread neighboursSpread(const CountQuery& query) {
+	const Trial& trial = query.trial;
+	double shared      = 0;
+	double own         = 0;
+	int count          = 0;
+	for (int row = std::max(query.y - 1, 0); row <= std::min(query.y + 1, trial.height - 1); ++row) {
+		for (int column = std::max(query.x - 1, 0); column <= std::min(query.x + 1, trial.width - 1); ++column) {
+			if (row == query.y && column == query.x) {
+				continue;
+			}
+			const SplitSpread& spread = trial.spreads[std::size_t(row) * std::size_t(trial.width) + std::size_t(column)];
+			shared += spread.shared;
+			own += spread.own;
+			count += 1;
+		}
+	}
+	return SplitSpread { float(shared / std::max(count, 1)), float(own / std::max(count, 1)) };
+}
+
+int splitNear(double ideal, int ceiling) {
+	int split = 1;
+	while (split < ceiling && split * std::sqrt(2.0) <= ideal) {
+		split = split * 2;
+	}
+	return split;
+}
+
+int confidenceSplit(const Stopping& stopping, const CountQuery& query) {
+	const SplitSpread spread = neighboursSpread(query);
+	const int ceiling        = splitCeiling(stopping.batch);
+	if (!(spread.shared > 0)) {
+		return ceiling;
+	}
+	return splitNear(std::sqrt(double(spread.own) * sharedCost / double(spread.shared)), ceiling);
+}
+
+double splitNoise(const Stopping& stopping, const CountQuery& query) {
+	const SplitSpread spread = neighboursSpread(query);
+	const double tried       = double(spread.shared) * query.trial.split + double(spread.own);
+	if (!(tried > 0)) {
+		return 1;
+	}
+	return (double(spread.shared) * confidenceSplit(stopping, query) + double(spread.own)) / tried;
+}
+
 int confidenceAllotted(const Stopping& stopping, const CountQuery& query) {
 	const Around around = neighboursWanted(query);
 	if (around.count == 0) {
 		return stopping.samples;
 	}
-	const double batches = std::ceil(std::sqrt(around.sum / around.count * stopping.samples) / stopping.batch);
+	const double wanted  = around.sum / around.count * splitNoise(stopping, query);
+	const double batches = std::ceil(std::sqrt(wanted * stopping.samples) / stopping.batch);
 	if (!(batches * stopping.batch < stopping.samples)) {
 		return stopping.samples;
 	}

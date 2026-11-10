@@ -61,6 +61,7 @@ struct StoppingArm {
 	const SceneFile& file;
 	const Tree& tree;
 	StoppingMember member;
+	int split;
 };
 
 struct StoppingSpread {
@@ -70,8 +71,9 @@ struct StoppingSpread {
 };
 
 Rendered stoppedFrame(const StoppingArm& arm, int seed) {
-	Shot shot        = arm.file.shot;
-	shot.render.seed = seed;
+	Shot shot         = arm.file.shot;
+	shot.render.seed  = seed;
+	shot.render.split = arm.split;
 
 	const Geometry geometry = {
 		.scene = arm.file.scene,
@@ -140,6 +142,15 @@ StoppingSpread stoppingSpread(const StoppingArm& arm) {
 	return spread;
 }
 
+double worstGap(const StoppingSpread& a, const StoppingSpread& b) {
+	double worst = 0;
+	for (int c = 0; c < 3; ++c) {
+		const double combined = std::sqrt(a.error[c] * a.error[c] + b.error[c] * b.error[c]);
+		worst                 = std::max(worst, std::abs(a.mean[c] - b.mean[c]) / std::max(combined, 1e-12));
+	}
+	return worst;
+}
+
 void checkStoppedMeans() {
 	const SceneFile file = sceneOrExit(writeScene("stopping", stoppingText));
 	const TestTree tree  = testTree(file, stoppingThreads);
@@ -148,21 +159,30 @@ void checkStoppedMeans() {
 		.file   = file,
 		.tree   = tree.tree,
 		.member = StoppingMember::FixedCount,
+		.split  = 1,
+	};
+
+	const StoppingArm shared = {
+		.file   = file,
+		.tree   = tree.tree,
+		.member = StoppingMember::FixedCount,
+		.split  = 4,
 	};
 
 	const StoppingArm interval = {
 		.file   = file,
 		.tree   = tree.tree,
 		.member = StoppingMember::ConfidenceInterval,
+		.split  = 0,
 	};
 
 	const StoppingSpread a = stoppingSpread(fixed);
 	const StoppingSpread b = stoppingSpread(interval);
-	double worst           = 0;
-	for (int c = 0; c < 3; ++c) {
-		const double combined = std::sqrt(a.error[c] * a.error[c] + b.error[c] * b.error[c]);
-		worst                 = std::max(worst, std::abs(a.mean[c] - b.mean[c]) / std::max(combined, 1e-12));
-	}
+	const StoppingSpread s = stoppingSpread(shared);
+	const double worst     = worstGap(a, b);
+	const double split     = worstGap(a, s);
+	std::printf("stopping: alone %.5f %.5f %.5f, four to a first vertex %.5f %.5f %.5f, worst gap %.2f standard errors\n", a.mean[0], a.mean[1], a.mean[2], s.mean[0], s.mean[1], s.mean[2], split);
+	check(split < 4, "samples that share a first vertex leave the mean of samples alone unchanged");
 	std::printf("stopping: fixed %.5f %.5f %.5f at %.1f samples, confidence %.5f %.5f %.5f at %.1f samples, worst gap %.2f standard errors\n", a.mean[0], a.mean[1], a.mean[2], a.samples, b.mean[0], b.mean[1], b.mean[2], b.samples, worst);
 	check(worst < 4, "the confidence interval leaves the mean of a fixed count unchanged");
 	check(b.samples > 16 && b.samples < 64, "the confidence interval draws fewer samples where pixels are quiet");
@@ -180,6 +200,7 @@ void checkOwnTrialUnread() {
 		.batch     = 8,
 		.tolerance = 2,
 		.grade     = grade,
+		.split     = 0,
 	};
 
 	Trial trial = {
@@ -188,6 +209,8 @@ void checkOwnTrialUnread() {
 		.height  = 5,
 		.wanted  = std::vector<float>(35, 0.0f),
 		.totals  = std::vector<Colour>(35, Colour { 0, 0, 0 }),
+		.split   = 2,
+		.spreads = std::vector<SplitSpread>(35, SplitSpread { 0, 0 }),
 	};
 
 	std::mt19937 generator(7);
@@ -195,7 +218,11 @@ void checkOwnTrialUnread() {
 	for (float& wanted : trial.wanted) {
 		wanted = draw(generator);
 	}
+	for (SplitSpread& spread : trial.spreads) {
+		spread = SplitSpread { draw(generator), draw(generator) };
+	}
 	bool unread = true;
+	bool whole  = true;
 	for (int pixel = 0; pixel < 35; ++pixel) {
 		const CountQuery query = {
 			.x     = pixel % 7,
@@ -203,15 +230,23 @@ void checkOwnTrialUnread() {
 			.trial = trial,
 		};
 
-		const float own                  = trial.wanted[std::size_t(pixel)];
-		trial.wanted[std::size_t(pixel)] = 0;
-		const int low                    = samplesFor(stopping, query);
-		trial.wanted[std::size_t(pixel)] = 1e9f;
-		const int high                   = samplesFor(stopping, query);
-		trial.wanted[std::size_t(pixel)] = own;
-		unread                           = unread && low == high && low % 8 == 0 && low >= 16 && low <= 1024;
+		const float own                   = trial.wanted[std::size_t(pixel)];
+		const SplitSpread spread          = trial.spreads[std::size_t(pixel)];
+		trial.wanted[std::size_t(pixel)]  = 0;
+		trial.spreads[std::size_t(pixel)] = SplitSpread { 0, 1e9f };
+		const int low                     = samplesFor(stopping, query);
+		const int few                     = splitFor(stopping, query);
+		trial.wanted[std::size_t(pixel)]  = 1e9f;
+		trial.spreads[std::size_t(pixel)] = SplitSpread { 1e9f, 0 };
+		const int high                    = samplesFor(stopping, query);
+		const int many                    = splitFor(stopping, query);
+		trial.wanted[std::size_t(pixel)]  = own;
+		trial.spreads[std::size_t(pixel)] = spread;
+		unread                            = unread && low == high && low % 8 == 0 && low >= 16 && low <= 1024;
+		whole                             = whole && few == many && stopping.batch % few == 0;
 	}
 	check(unread, "a pixel's count is whole batches set by its neighbours' trials alone");
+	check(whole, "a pixel's split divides a batch and is set by its neighbours' trials alone");
 }
 
 void checkStopping() {

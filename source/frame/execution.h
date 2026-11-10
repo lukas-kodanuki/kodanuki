@@ -65,6 +65,15 @@ struct PixelJob {
 	 * How many samples a batch holds, which the fold closes batches by.
 	 */
 	int batch;
+	/**
+	 * How many samples share a first vertex, one for samples alone. The
+	 * job holds whole groups.
+	 */
+	int split;
+	/**
+	 * The first group's place in the pixel's run of groups.
+	 */
+	int group;
 };
 
 /**
@@ -164,6 +173,15 @@ struct SurfaceBand {
 	 */
 	int rows;
 };
+
+/**
+ * Return the first sample of one of a job's groups: its index, its
+ * group's place and how many samples share its first vertex.
+ *
+ * @param job The job.
+ * @param offset The sample's place in the job, the first of its group.
+ */
+PixelSample groupSample(const PixelJob& job, int offset);
 
 /**
  * Run a tile's jobs and return each pixel's estimate: the point's one

@@ -65,6 +65,11 @@ struct TileResult {
 	 */
 	std::vector<Colour> totals;
 	/**
+	 * After the trial, how each pixel's own trial parts its noise; empty
+	 * after the count pass.
+	 */
+	std::vector<SplitSpread> spreads;
+	/**
 	 * After a step of a sequence, each pixel's estimate; empty after the
 	 * passes of a still frame.
 	 */

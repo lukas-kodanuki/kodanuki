@@ -67,6 +67,8 @@ PathNumbers pixelNumbers(const Tracing& tracing, const PixelSample& sample) {
 	return PathNumbers {
 		.stream    = math::mixedBits(tracing.seed) ^ math::mixedBits(place),
 		.index     = sample.index,
+		.group     = sample.group,
+		.branches  = sample.branches,
 		.sequenced = true,
 	};
 }
@@ -78,7 +80,7 @@ Wavelengths pixelWavelengths(const PathNumbers& numbers) {
 		.coordinate = 0,
 	};
 
-	return sampledWavelengths(wavelengthShare(math::hashedNumber(start), numbers.index));
+	return sampledWavelengths(wavelengthShare(math::hashedNumber(start), numbers.group));
 }
 
 math::UnitPair lensPair(const Tracing& tracing, const Path& path) {
@@ -324,7 +326,7 @@ Spectrum4 lightMet(const Tracing& tracing, const MetLight& met) {
 		.distance = meet.distance,
 	};
 
-	const StrategyCounts counts = countsOf(tracing.strategies);
+	const StrategyCounts counts = aimCounts(tracing, path, path.depth - 1);
 
 	const MeetEnding ending = {
 		.weighing = path.weighing,
@@ -397,7 +399,7 @@ void glowMetAt(const Tracing& tracing, Path& path, const GlowSight& sight) {
 		return;
 	}
 
-	const StrategyCounts counts = countsOf(tracing.strategies);
+	const StrategyCounts counts = aimCounts(tracing, path, path.depth - 1);
 
 	const MeetEnding ending = {
 		.weighing = path.weighing,
@@ -1011,10 +1013,18 @@ RuleState drawnRules(const RuleState& rules) {
 	return drawn;
 }
 
+bool branchesHere(const Path& path) {
+	return path.depth == 0 && path.numbers.branches > 1 && !path.branched;
+}
+
 void scatteredFrom(const Tracing& tracing, Walk& walk) {
 	Path& path = walk.path;
 	walk.phase = WalkPhase::Done;
 	if (atDepthCap(standingCounts(path), depthCaps(tracing.limits))) {
+		return;
+	}
+	if (branchesHere(path)) {
+		walk.phase = WalkPhase::Branching;
 		return;
 	}
 
@@ -1539,9 +1549,37 @@ void walkAnswered(const Tracing& tracing, Walk& walk, const Answer& answer) {
 	rayAnswered(tracing, walk, answer);
 }
 
+void branchedFrom(const Tracing& tracing, const Walk& stem, std::uint32_t index, Walk& branch) {
+	const bool first          = index == stem.path.numbers.index;
+	const Spectrum4 radiance  = first ? stem.path.radiance * double(stem.path.numbers.branches) : flatSpectrum(0);
+	branch.path               = stem.path;
+	branch.companions         = stem.companions;
+	branch.lead               = stem.lead;
+	branch.first              = stem.first;
+	branch.path.radiance      = radiance;
+	branch.path.numbers.index = index;
+	branch.path.branched      = true;
+	branch.lines.count        = 0;
+	branch.line               = 0;
+	scatteredFrom(tracing, branch);
+}
+
+Spectrum4 walkRadiance(const Walk& walk) {
+	const Path& path = walk.path;
+	return path.branched ? path.radiance : path.radiance * double(path.numbers.branches);
+}
+
+Colour walkColour(const Walk& walk) {
+	return colourOf(walk.path.wavelengths, walkRadiance(walk));
+}
+
+Colour sharedColour(const Walk& walk) {
+	return colourOf(walk.path.wavelengths, walk.path.radiance * double(walk.path.numbers.branches));
+}
+
 void walkedOut(const Tracing& tracing, Walk& walk) {
 	std::vector<double> registers;
-	while (walk.phase != WalkPhase::Done) {
+	while (walk.phase != WalkPhase::Done && walk.phase != WalkPhase::Branching) {
 		const Hit hit = intersect(tracing.geometry, wantedRay(tracing, walk).ray);
 
 		const Answer answer = {
@@ -1558,7 +1596,7 @@ Traced tracePath(const Tracing& tracing, const PixelSample& sample) {
 	walkedOut(tracing, walk);
 	return Traced {
 		.wavelengths = walk.path.wavelengths,
-		.radiance    = walk.path.radiance,
+		.radiance    = walkRadiance(walk),
 	};
 }
 

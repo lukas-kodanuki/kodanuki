@@ -204,7 +204,7 @@ a dropped rule is deleted.
     builds only the programs the target runs. A config
     is a TOML file in `target/configs/` with three blocks. `[settings]`
     takes `width` and `height` (`--size`), `tolerance`,
-    `samples`, `batch`, `surfaces`, `collisions`, `seed` and `threads`
+    `samples`, `batch`, `split`, `surfaces`, `collisions`, `seed` and `threads`
     (their flags; one left out keeps the scene's value), `faces` (`true`
     or `false`) and `smooth_glass` (`"exact"` or `"lobe"`). `[viewer]`
     takes what only the viewer reads: `internal_width` and

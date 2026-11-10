@@ -419,7 +419,7 @@ Outputs readOutput(const Outputs& outputs, const std::string& flag, const std::s
 
 int main(int argc, char** argv) {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: kodanuki scene.sdf [--size w h] [--seed n] [--tolerance t] [--samples n] [--batch n] [--surfaces n] [--collisions n] [--threads n] [--use key=value ...] [--region lx ly lz hx hy hz] [--least e] [--depth n] [--out image.ppm] [--pfm image.pfm] [--frames n --track cameras.txt --out directory [--reconstruction mean|temporal|temporal+denoise|temporal+denoise+upscale] [--factor 1|2|3|4]] [--dump] [--probe points.txt] [--normals out.ppm]\n");
+		std::fprintf(stderr, "usage: kodanuki scene.sdf [--size w h] [--seed n] [--tolerance t] [--samples n] [--batch n] [--split n] [--surfaces n] [--collisions n] [--threads n] [--use key=value ...] [--region lx ly lz hx hy hz] [--least e] [--depth n] [--out image.ppm] [--pfm image.pfm] [--frames n --track cameras.txt --out directory [--reconstruction mean|temporal|temporal+denoise|temporal+denoise+upscale] [--factor 1|2|3|4]] [--dump] [--probe points.txt] [--normals out.ppm]\n");
 		return 1;
 	}
 	SceneFile file  = sceneOrExit(argv[1]);

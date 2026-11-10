@@ -36,6 +36,15 @@ std::uint64_t dimensionOf(const Coordinate& coordinate) {
 	return std::uint64_t(firstEvent + coordinate.event * eventDimensions + role - int(Draw::LightU));
 }
 
+bool sharedDraw(const Coordinate& coordinate) {
+	const Draw draw = coordinate.draw;
+	if (draw < Draw::LightU) {
+		return true;
+	}
+	const bool aims = draw == Draw::LightU || draw == Draw::LightV || draw == Draw::Pick || draw == Draw::AimPart || draw == Draw::AimJitterU || draw == Draw::AimJitterV;
+	return coordinate.event == 0 && aims;
+}
+
 Ray leavingRay(const Vertex& vertex, const math::Vector& direction, std::uint32_t medium) {
 	const double side = math::dot(direction, vertex.surface) > 0 ? vertex.lift : -vertex.lift;
 	return Ray {
@@ -103,6 +112,7 @@ Path freshPath(const PathNumbers& numbers, const Wavelengths& wavelengths) {
 		.medium      = noMaterial,
 		.weighing    = weighing,
 		.numbers     = numbers,
+		.branched    = false,
 	};
 }
 

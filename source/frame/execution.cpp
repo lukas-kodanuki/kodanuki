@@ -11,17 +11,78 @@
 
 namespace kodanuki {
 
-Estimate jobOneAtATime(const Tracing& tracing, const PixelJob& job) {
-	Estimate estimate = job.start;
-	for (int k = 0; k < job.count; ++k) {
-		const PixelSample sample = {
-			.x     = job.x,
-			.y     = job.y,
-			.index = std::uint32_t(job.first + k),
+struct GroupRun {
+	const Tracing& tracing;
+	const PixelJob& job;
+	int offset;
+};
+
+PixelSample groupSample(const PixelJob& job, int offset) {
+	return PixelSample {
+		.x        = job.x,
+		.y        = job.y,
+		.index    = std::uint32_t(job.first + offset),
+		.group    = std::uint32_t(job.group + offset / job.split),
+		.branches = std::uint32_t(job.split),
+	};
+}
+
+Estimate foldedAlone(const GroupRun& run, const Walk& stem, const Estimate& estimate) {
+	const Colour colour = walkColour(stem);
+
+	const Sampled first = {
+		.colour = colour,
+		.shared = colour,
+	};
+
+	const Sampled none = {
+		.colour = { 0, 0, 0 },
+		.shared = { 0, 0, 0 },
+	};
+
+	Estimate folded = foldedSample(estimate, first, run.job.batch);
+	for (int k = 1; k < run.job.split; ++k) {
+		folded = foldedSample(folded, none, run.job.batch);
+	}
+	return folded;
+}
+
+Estimate foldedBranches(const GroupRun& run, const Walk& stem, const Estimate& estimate) {
+	Estimate folded = estimate;
+	Walk branch     = stem;
+	for (int k = 0; k < run.job.split; ++k) {
+		branchedFrom(run.tracing, stem, stem.path.numbers.index + std::uint32_t(k), branch);
+		walkedOut(run.tracing, branch);
+
+		const Sampled drawn = {
+			.colour = walkColour(branch),
+			.shared = k == 0 ? sharedColour(stem) : Colour { 0, 0, 0 },
 		};
 
-		const Traced traced = tracePath(tracing, sample);
-		estimate            = foldedSample(estimate, colourOf(traced.wavelengths, traced.radiance), job.batch);
+		folded = foldedSample(folded, drawn, run.job.batch);
+	}
+	return folded;
+}
+
+Estimate foldedGroup(const GroupRun& run, const Estimate& estimate) {
+	Walk stem = walkStarted(run.tracing, groupSample(run.job, run.offset));
+	walkedOut(run.tracing, stem);
+	if (stem.phase != WalkPhase::Branching) {
+		return foldedAlone(run, stem, estimate);
+	}
+	return foldedBranches(run, stem, estimate);
+}
+
+Estimate jobOneAtATime(const Tracing& tracing, const PixelJob& job) {
+	Estimate estimate = job.start;
+	for (int offset = 0; offset < job.count; offset += job.split) {
+		const GroupRun run = {
+			.tracing = tracing,
+			.job     = job,
+			.offset  = offset,
+		};
+
+		estimate = foldedGroup(run, estimate);
 	}
 	return estimate;
 }
@@ -47,14 +108,14 @@ JobRecord jobRecorded(const Tracing& tracing, const PixelJob& job) {
 	};
 
 	for (int k = 0; k < job.count; ++k) {
-		const PixelSample sample = {
-			.x     = job.x,
-			.y     = job.y,
-			.index = std::uint32_t(job.first + k),
+		done.record = recordedPath(tracing, groupSample(job, k));
+
+		const Sampled drawn = {
+			.colour = done.record.parts.total,
+			.shared = done.record.parts.total,
 		};
 
-		done.record   = recordedPath(tracing, sample);
-		done.estimate = foldedSample(done.estimate, done.record.parts.total, job.batch);
+		done.estimate = foldedSample(done.estimate, drawn, job.batch);
 	}
 	return done;
 }

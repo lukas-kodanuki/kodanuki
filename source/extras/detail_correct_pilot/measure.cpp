@@ -64,11 +64,12 @@ PilotTrail emptyTrail() {
 
 Walk pilotWalk(const Tracing& tracing, const PilotStart& start) {
 	const PixelSample sample = {
-		.x     = start.x,
-		.y     = start.y,
-		.index = 0,
+		.x        = start.x,
+		.y        = start.y,
+		.index    = 0,
+		.group    = 0,
+		.branches = 1,
 	};
-
 	Walk walk         = walkStarted(tracing, sample);
 	const Ray ray     = pixelRay(tracing.lens, start.throughX, start.throughY);
 	walk.ray          = ray;

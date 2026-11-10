@@ -12,6 +12,14 @@ double infiniteCount(const Densities& densities) {
 	return double(std::isinf(densities.meet)) + double(std::isinf(densities.aim)) + double(std::isinf(densities.join));
 }
 
+StrategyCounts sharedAim(const StrategyCounts& counts, std::uint32_t branches) {
+	return StrategyCounts {
+		.aim     = counts.aim / double(branches),
+		.join    = counts.join,
+		.connect = counts.connect,
+	};
+}
+
 bool atDepthCap(const VertexCounts& counts, const DepthCaps& caps) {
 	return counts.surfaces >= caps.surfaces || counts.collisions >= caps.collisions;
 }

@@ -9,10 +9,14 @@
 
 namespace kodanuki {
 
+std::uint64_t placeOf(const NumberQuery& query) {
+	return sharedDraw(query.coordinate) ? query.numbers.group : query.numbers.index;
+}
+
 double numberAt(const Sampling& sampling, const NumberQuery& query) {
 	const math::Key key = {
 		.stream     = query.numbers.stream,
-		.index      = query.numbers.index,
+		.index      = placeOf(query),
 		.coordinate = dimensionOf(query.coordinate),
 	};
 
@@ -46,7 +50,7 @@ math::UnitPair pairAt(const Sampling& sampling, const NumberQuery& first) {
 
 	const math::Key key = {
 		.stream     = first.numbers.stream,
-		.index      = first.numbers.index,
+		.index      = placeOf(first),
 		.coordinate = dimensionOf(first.coordinate),
 	};
 

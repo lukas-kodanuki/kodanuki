@@ -83,6 +83,8 @@ std::vector<PixelJob> sequenceJobs(const Lens& lens, int batch) {
 				.count = sequenceCount(x, y),
 				.start = emptyEstimate(),
 				.batch = batch,
+				.split = 1,
+				.group = (x + y) % 3,
 			};
 
 			jobs.push_back(job);

@@ -31,7 +31,7 @@ void aimStep(const Tracing& tracing, const StrategyVisit& visit) {
 	const Standing standing = {
 		.path       = visit.path,
 		.companions = visit.companions,
-		.counts     = countsOf(tracing.strategies),
+		.counts     = aimCounts(tracing, visit.path, visit.path.depth),
 	};
 
 	aimedFrom(tracing, standing, visit.lines);
@@ -99,6 +99,11 @@ bool strategyOn(const Strategies& strategies, StrategyMember member) {
 
 bool strategyLeads(const Strategies& strategies) {
 	return strategyOn(strategies, StrategyMember::Connect) && !strategies.lampShares.empty();
+}
+
+StrategyCounts aimCounts(const Tracing& tracing, const Path& path, int vertex) {
+	const StrategyCounts counts = countsOf(tracing.strategies);
+	return vertex == 0 ? sharedAim(counts, path.numbers.branches) : counts;
 }
 
 StrategyCounts countsOf(const Strategies& strategies) {

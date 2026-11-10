@@ -600,6 +600,11 @@ struct Render {
 	 */
 	int batch;
 	/**
+	 * How many samples share a first vertex: 1, 2, 4 or 8 for every
+	 * pixel, or 0 where the stopping says it for each pixel.
+	 */
+	int split;
+	/**
 	 * The most surfaces a path stands on: one more than the most it
 	 * scatters from, apart from its collisions.
 	 */

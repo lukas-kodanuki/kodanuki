@@ -753,6 +753,15 @@ void watched(const std::function<void()>& work, Watch& watch) {
 	done.get();
 }
 
+int splitArgument(const std::string& value) {
+	const int split = std::stoi(value);
+	if (split != 0 && split != 1 && split != 2 && split != 4 && split != 8) {
+		std::fprintf(stderr, "--split: 0, 1, 2, 4 or 8\n");
+		std::exit(1);
+	}
+	return split;
+}
+
 bool readSetting(Shot& shot, char** argv, int& i) {
 	const std::string flag = argv[i];
 	Render& render         = shot.render;
@@ -775,6 +784,10 @@ bool readSetting(Shot& shot, char** argv, int& i) {
 	}
 	if (flag == "--batch") {
 		render.batch = std::max(0, std::stoi(argv[++i]));
+		return true;
+	}
+	if (flag == "--split") {
+		render.split = splitArgument(argv[++i]);
 		return true;
 	}
 	if (flag == "--surfaces") {

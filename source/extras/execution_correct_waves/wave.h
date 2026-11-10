@@ -56,6 +56,9 @@ struct PixelSlot {
  * A tile's jobs in flight.
  *
  * Its walks, colours, slots and queues are updated in place (rule 46).
+ * A slot launches the first sample of each of its groups; when that
+ * walk waits on the group's first vertex, branchedFrom() fills the group's
+ * walks from it.
  * Every ray is answered through walkAnswered() and every pixel folded
  * through foldedSample(), so the wave changes only the order the rays
  * are traced in, never what any path computes.
@@ -80,6 +83,11 @@ struct Wave {
 	 * The colour each walk ended with, kept until its slot folds.
 	 */
 	std::vector<Colour> colours;
+	/**
+	 * The part of each walk's colour that its group shares
+	 * (sharedColour()), kept until its slot folds.
+	 */
+	std::vector<Colour> shared;
 	/**
 	 * The slots.
 	 */

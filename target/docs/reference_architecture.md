@@ -43,7 +43,7 @@ downward:
 
 ```
 render.cpp, viewer.cpp  the programs (viewer/ holds the viewer's parts; it alone links SDL3)
-frame       tiles, one path per sample, byte-identical merge, image hand-off, sequences
+frame       tiles, one or many paths per sample, byte-identical merge, image hand-off, sequences
 transport   paths, vertices, the MIS engine over strategies
 light       the five lights, gradient sky
 material    matte, plastic, metal, glass; microfacet, Fresnel, energy tables
@@ -94,7 +94,7 @@ link-time seams or virtual calls.
 | Detail | tree | by distance (core); pilot, focus on view, split rules (hidden primitives, crowded leaves) | says how fine a cell must be; hits stay within tolerance |
 | Build pass | tree, walk | program cutting, shared coefficients, shared subtrees, split beside finer, face slabs (a slab after every curved face, which the leaf solve asks per face through the point's dispatch before it solves the face), faced hits (words after a run's table: the program each face comes from alone, and the faces that are the field's own surface with the scene leaf they paint; a hit asks the point's dispatch for the face it landed on and takes that program alone, or the face's gradient and leaf without evaluating any program) | rewrites the tree; hits stay within tolerance (the compression passes and face slabs change no bit; faced hits change normals by float rounding of the face); memory is reported |
 | Feature | material, light, sky, sdf | coats, thin film, media and scattering, dispersion, clouds, atmosphere, moon, stars, painted sky, path rules, lattice, material switches | adds scene content: language fields, scene data and shading |
-| Stopping | frame | fixed count (core); confidence interval | decides when a pixel is done; pixels stay independent |
+| Stopping | frame | fixed count (core); confidence interval | decides when a pixel is done and how many of its samples share a first vertex; pixels stay independent |
 | Execution | frame, walk | one path at a time, and the G-buffer one ray at a time (core); the G-buffer in 8-ray packets; waves with ray queues and the 8-wide packet walk, bare shadow rays, missed lanes (the lanes that surely meet nothing in a surface leaf found eight at once), grouped hits (the programs of a leaf several lanes met read once for all, eight points a step) | runs the same paths in another order; the frame stays byte-identical to the core's, and so do a sequence's records |
 | Reconstruction | frame | the running mean (core, Mean), bilinear upsampling (Upsample), a temporal accumulation (Temporal), an à-trous denoiser (Denoise), a temporal upscaler (Upscale) | turns a sequence's drawn frames and its history into the shown image; never changes the scene, the tree or the preparations; a still frame runs none. With a G-buffer (drawn pixel (x, y)'s first surface through the centre of the shown pixel its phase aims at) Temporal and Denoise work at the drawn (internal) size on the jittered pixels, and Upscale, last, blends that image into a history at the shown (output) size |
 
@@ -116,5 +116,6 @@ code path.
 - **The frame:** `Prepared`, one typed field per Preparation member.
 - **Sequences:** a frame of a sequence (`steppedFrame`, frame/sequence.h) draws one sample a pixel, of the frame's index, and reads its `FrameStep` (index, lens, lens before, film plan, what changed) and the `History` of the frame before; it returns the shown image and the next `History`: the frame's `FrameRecord` (each sample's `Parts` and first `Surface`), each pixel's `Estimate` since the last change, and the kept preparations. Both are plain values the caller owns; nothing is global. A still frame (`renderFrame`) builds no history, records nothing (`Tracing.recording` off, `stillFilm()`) and runs no Reconstruction member.
 - **Paths:** `Path` holds the core state only (throughput, wavelengths, hero, vertex); `GuideState` and `RuleState` are separate structs owned by their extras.
+- **Groups:** a pixel's samples run in groups that share a first vertex (`split`, reference_language.md). The group's first sample walks the camera ray, lights the vertex and waits there (`WalkPhase::Branching`); `branchedFrom()` then takes every sample of the group on from a copy of it. The first sample carries what the shared stretch gathered once for each sample of the group, so every Execution member still folds one colour a sample, in index order. The shared coordinates (pixel, lens, wavelengths, the first vertex's lights) are drawn by the group's place, the rest by the sample's index, and the weighing counts the first vertex's aims once a group (`sharedAim()`). The fold keeps the spread of the shared part apart, which is what the stopping chooses a pixel's split from.
 - **Precision:** transport is double; the walk's packet maths is float (rule 5).
 
