@@ -1,6 +1,6 @@
 #include "check.h"
-#include "extras/reconstruction_biased_temporal/temporal.h"
-#include "material/material.h"
+#include "plugins/reconstruction/temporal/temporal.h"
+#include "plugins/transport/paths/material/material.h"
 #include "sdf/program.h"
 
 #include <cmath>
@@ -53,7 +53,7 @@ Lens temporalLens(const math::Vector& eye, int width, int height) {
 }
 
 Temporal shotTemporal(const TemporalState& before, const TestShot& shot) {
-	static const std::vector<Estimate> estimates;
+	static const std::vector<PixelSum> estimates;
 
 	const ShownFrame frame = {
 		.width     = shot.record.width * shot.film.factor,
@@ -63,6 +63,7 @@ Temporal shotTemporal(const TemporalState& before, const TestShot& shot) {
 		.film      = shot.film,
 		.moved     = shot.moved,
 		.restarted = shot.restarted,
+		.recounted = false,
 		.still     = 1,
 		.record    = shot.record,
 		.estimates = estimates,

@@ -1,17 +1,17 @@
 #include "check.h"
-#include "extras/build_correct_face_slabs/face_slabs.h"
-#include "frame/frame.h"
-#include "frame/run.h"
+#include "core/frame.h"
+#include "plugins/build/face_slabs/face_slabs.h"
+#include "plugins/geometry/tree/build.h"
+#include "plugins/geometry/tree/classify.h"
+#include "plugins/geometry/tree/cut.h"
+#include "plugins/geometry/tree/grow.h"
+#include "plugins/geometry/tree/pack.h"
+#include "plugins/geometry/tree/pass.h"
+#include "plugins/geometry/tree/patch.h"
+#include "plugins/geometry/tree/walk.h"
+#include "plugins/transport/paths/paths.h"
 #include "sdf/scene.h"
 #include "syntax/evaluator.h"
-#include "tree/build.h"
-#include "tree/classify.h"
-#include "tree/cut.h"
-#include "tree/grow.h"
-#include "tree/pack.h"
-#include "tree/pass.h"
-#include "tree/patch.h"
-#include "walk/walk.h"
 
 #include <algorithm>
 #include <array>
@@ -903,15 +903,9 @@ bool sameHit(const Hit& a, const Hit& b) {
 Shared sharedHits(const SceneFile& file, const Tree& plain, const Tree& shared) {
 	const Lens lens = lensOf(file.shot.camera, file.shot.render);
 
-	const Geometry one = {
-		.scene = file.scene,
-		.tree  = plain,
-	};
+	const Geometry one = treeGeometry(file.scene, plain);
 
-	const Geometry other = {
-		.scene = file.scene,
-		.tree  = shared,
-	};
+	const Geometry other = treeGeometry(file.scene, shared);
 
 	Shared tally = {
 		.differ = 0,

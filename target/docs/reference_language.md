@@ -2,7 +2,8 @@
 
 A scene is one `.sdf` file, written by hand. It is C-like: `//` and
 `/** ... */` comments (any `/* ... */`, not nested), `;` ends a
-statement, braces make a block. It runs once when it loads. What it leaves behind is a flat list of shapes, each a
+statement, braces make a block. It runs once when it loads, and once
+more for every frame of a clip (see Time). What it leaves behind is a flat list of shapes, each a
 point function placed and painted, plus the camera, lights, sky and
 settings. Space is z-up, lengths are metres, angles are radians.
 
@@ -67,7 +68,8 @@ compiled once per distinct set of list arguments; its number
 arguments stay arguments, so a thousand spheres share one program.
 
 Built-ins: `sqrt abs floor sin cos atan2 pow min max clamp mix
-length dot cross normalize select all any sign`, and `pi`.
+length dot cross normalize select all any sign`, and `pi`; `linear` and
+`smooth` read a list of stops (see Time).
 
 ## Builders: `shape`
 
@@ -259,9 +261,10 @@ Several coats are laid on innermost first: in
 `coat(a, ...) coat(b, ...) sphere(1)` the sphere wears `b`, then `a`.
 A roughness a coat changes is drawn by one of 17 copies of the
 material at roughness 0, 1/16, ... 1, the two either side of it picked
-by a hash of the point. This is the mixed extra `feature_mixed_coats`
-(its colours, tints and glows are exact, its laddered roughness is not);
-built off (reference_architecture.md), every material keeps its own roughness.
+by a hash of the point. This is the plugin `feature/coats`, Biased in
+part (its colours, tints and glows are exact, its laddered roughness is
+not); built off (reference_architecture.md), every material keeps its
+own roughness.
 
 A bump's relief is `grain` (two octaves of value noise), `pits`
 (hollows where the noise is high), `streak` (noise drawn out along the
@@ -282,8 +285,8 @@ coat(rust, facing([0, 0, 1], level = 0.3, soft = 0.1, ragged = 0.25, grain = 0.1
 
 A shape may say rules about the paths that meet it, each a switch of
 `rule` that is 1 (the default) or 0. Inner rules override outer ones.
-Rules change what the physics would draw: they are the biased extra
-`feature_biased_path_rules`, and built off (reference_architecture.md) they are
+Rules change what the physics would draw: they are the Biased plugin
+`feature/path_rules`, and built off (reference_architecture.md) they are
 ignored.
 
 ```
@@ -307,6 +310,52 @@ alone (the empty list, the default, lights every shape), and
 `caustics = 0`, so that no caustic ends on it. A group name is a word,
 and a scene names at most 64 groups.
 
+## Time
+
+Every file starts with one binding at its top level, `time`: a number
+in seconds. It is 0 for a still, the frame's time for a frame of a
+clip, and the number given with `--time`. Anything may read it: a
+place, a turn, a size, a material, a light, the camera, a loop bound.
+The file runs again for every frame, so what it leaves behind may
+differ from frame to frame in any way.
+
+```
+at([0, 0, 1 + abs(sin(pi * time))]) sphere(0.3);
+```
+
+`time` cannot be changed: `let time = ...` is an error. The `render`
+and `clip` blocks must come out the same at every time.
+
+Two built-ins read a value off a list of stops:
+
+```
+let eyes = [
+	[0, -2.3, -4.9, 1.5],
+	[4.8, 0.4, -4.2, 1.3],
+	[8.8, 0.8, -3.6, 0.6],
+];
+
+camera {
+	eye    = smooth(eyes, time);
+	target = [0, 0, 0.95];
+}
+```
+
+A stop is `[t, values...]`: where its time is and what holds there.
+The times rise. `linear(stops, t)` joins the stops by straight lines;
+`smooth(stops, t)` by a curve through every stop that turns no
+corners (Catmull-Rom, its slope at a stop taken from the stops either
+side, at an end from the one stop beside it). Both give a number where
+a stop holds one value and a vector where it holds more. Before the
+first stop the first holds, past the last the last.
+
+Two stops with the same time are a jump: before that time the first
+holds, from it on the second. A `smooth` curve ends at a jump and a
+new one starts.
+
+The second argument is any number, not only `time`: `linear(sway,
+beat)` reads a dance by the beat.
+
 ## Settings
 
 Blocks of fields, one each, at the top level:
@@ -316,6 +365,7 @@ render { width = 1920; height = 1200; tolerance = 2; seed = 1; }
 camera { eye = [3, 3, 4]; target = [0, 0, 2]; up = [0, 0, 1]; fov = 0.8;
          aperture = 0; focus = 0; }
 grade  { exposure = 1; curve = filmic; }        // filmic | clamped
+clip   { duration = 12.8; rate = 24; cuts = [4.8, 8.8]; }
 sky gradient { zenith = [...]; horizon = [...]; ground = [...]; }
 sky physical { haze = 3; ground = [...]; }      // lit by the sun light
 sky painted { day = [...]; dusk = [...]; night = [...]; }
@@ -363,6 +413,15 @@ the shared stretch and the rest (a fixed count without a trial takes
 1). A pixel's count is cut to whole groups. The region the tree is built over is found by sampling the
 scene from the camera out to `far`. Shapes that never end, such as a
 ground plane, are cut off at `far`.
+
+`clip` makes the file a video. `duration` is its length in seconds
+and `rate` its frames a second; it has `round(duration * rate)`
+frames, and frame k is the scene at `time = k / rate`. `cuts` is a
+list of times, rising and inside the clip, where one shot ends and the
+next begins (default none): the frame that reaches a cut starts over
+and keeps nothing of the frames before it. A file without `clip` is a
+still. A `clip` block holds fields; `clip` with statements in its
+braces is the join (see Joins).
 
 The command line overrides every `render` field but `far`: `--size w
 h`, `--tolerance t`, `--samples n`, `--batch n`, `--split n`, `--surfaces n`,
@@ -419,8 +478,8 @@ thickest, and `span` how far across the largest clouds run. The clouds
 veil the sky behind them and thin the light of every sun and moon that
 reaches a point through them. A camera ray, and a ray that has passed
 only exact surfaces since, marches through them in full; any other ray
-reads them off a table laid out once. The table is the biased extra
-`feature_biased_clouds`; built off (reference_architecture.md), every ray marches.
+reads them off a table laid out once. The table is the Biased plugin
+`feature/clouds`; built off (reference_architecture.md), every ray marches.
 
 `camera.aperture` is the radius of the lens in metres; 0 (the default)
 is a pinhole, sharp at every distance. `focus` is how far in front of
@@ -461,29 +520,24 @@ these rules:
 The first error stops the load, which returns it as
 `file:line:column: message` (rule 19).
 
-## Camera tracks
+## Clips
 
-`kodanuki scene.sdf --frames n --track cameras.txt --out directory`
-draws a sequence of n frames, one sample a pixel each, and writes
-`frame-0000.ppm` and `frame-0000.pfm` onward into the directory. The
-track is a plain text file, not the scene language: one camera a line,
-six numbers apart by spaces, the eye and then the target.
+`kodanuki scene.sdf --out directory` draws the clip of a file that
+has one and writes `frame-0000.ppm` and `frame-0000.pfm` onward into
+the directory. `--time t` draws the still at t instead, of a file
+with a clip or without, and `--out` is then an image.
+`target/tools/clip-video.py directory --scene scene.sdf` joins the
+frames into `clip.mp4` beside them with ffmpeg, at the clip's rate.
 
-```
-4.2 -5.1 3.3 0 0 0.9
-4.1 -5.2 3.3 0 0 0.9
-```
+Each frame is drawn as the still of its time would be, by the same
+stopping. While nothing changes from one frame to the next, a frame
+continues the pixels' estimates; the frame of a cut starts over.
 
-Frame k looks through line k; past the last line every frame looks
-through the last one, so a track of one line holds the camera still.
-The scene's `camera` gives every other field (`up`, `fov`, `aperture`,
-`focus`). While the camera holds still, each frame continues the
-pixels' estimates; once it moves, they start over. `--samples` sets
-the batches and the light pass, not how many samples a frame draws, so
-the last of n frames of a still track drawn with `--samples n --use
-stopping=fixed` is the frame drawn with the same flags and `--out`
-alone, to the byte. Any other line, and a track of no lines, is an
-error.
+The viewer plays a clip by the clock and starts again at its end.
+Where a frame takes longer to build than the clip gives it, frames
+are left out. The camera is the clip's until a key moves it. `P`
+pauses the time, and the frame then clears as a still does; the left
+and right arrow keys step one frame back and forward.
 
 `--reconstruction mean|temporal|temporal+denoise|temporal+denoise+upscale`
 chooses how the frames are shown: `mean` (the default) is the running
@@ -495,4 +549,7 @@ viewer does. `--factor 1|2|3|4` (default 1) draws each frame at the
 size divided by the factor, jittered, the phases in the Bayer order,
 and writes it at the size; a factor above 1 needs
 `temporal+denoise+upscale`, and a size that is a multiple of the factor.
-The defaults draw the track as without the flags, to the byte.
+
+`target/tools/track-stops.py cameras.txt` turns a camera track, a
+text file of six numbers a line (the eye and the target), into two
+lists of stops to paste into a scene.

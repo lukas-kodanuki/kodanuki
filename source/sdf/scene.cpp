@@ -29,6 +29,10 @@ double joinPair(const Node& node, double a, double b) {
 	return a;
 }
 
+int clipFrames(const Clip& clip) {
+	return std::max(1, int(std::lround(clip.duration * clip.rate)));
+}
+
 double leafDistance(const Scene& scene, const Leaf& leaf, const Probe& probe) {
 	const double d[3] = { probe.p.x - leaf.placement.origin[0], probe.p.y - leaf.placement.origin[1], probe.p.z - leaf.placement.origin[2] };
 	double local[3];
@@ -289,6 +293,14 @@ std::vector<Program> objectPrograms(const Scene& scene) {
 		programs.push_back(objectProgram(scene, i));
 	}
 	return programs;
+}
+
+std::size_t longestProgram(const Scene& scene) {
+	std::size_t longest = 0;
+	for (const Program& program : scene.programs) {
+		longest = std::max(longest, program.steps.size());
+	}
+	return longest;
 }
 
 std::uint32_t firstSun(const Lighting& lighting) {

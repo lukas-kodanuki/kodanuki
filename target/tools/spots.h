@@ -1,7 +1,7 @@
 #pragma once
 
+#include "plugins/geometry/tree/cut.h"
 #include "sdf/scene.h"
-#include "tree/cut.h"
 
 #include <vector>
 

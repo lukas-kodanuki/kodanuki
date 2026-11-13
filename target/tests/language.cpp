@@ -1,8 +1,9 @@
 #include "check.h"
-#include "frame/run.h"
+#include "plugins/transport/paths/paths.h"
+#include "plugins/transport/paths/strategy.h"
+#include "sdf/compare.h"
 #include "sdf/scene.h"
 #include "syntax/evaluator.h"
-#include "transport/strategy.h"
 
 #include <array>
 #include <cmath>
@@ -293,18 +294,70 @@ void checkRenderCaps() {
 
 void checkLoadErrors() {
 	const std::string unended = writeScene("unended", "function ball(r) {\n\treturn length(p) - r;\n}\n\nball(1)\n");
-	const LoadedScene parsed  = loadScene(unended);
+	const LoadedScene parsed  = loadScene(unended, 0);
 	check(parsed.error == unended + ":6:1: expected ';'" && parsed.file.scene.objects.empty(), "a parse error comes back as a value with its location");
 
 	const std::string looped = writeScene("looped", "for i in 0..100000 {\n\tfor j in 0..100000 {\n\t\tblob(1);\n\t}\n}\n");
-	const LoadedScene run    = loadScene(looped);
+	const LoadedScene run    = loadScene(looped, 0);
 	check(run.error == looped + ":3:3: unknown function 'blob'", "an error inside loops stops the load at the first");
 
 	const std::string empty = writeScene("empty", "let a = 1;\n");
-	check(loadScene(empty).error == empty + ": the scene has no shapes", "a scene without shapes is an error");
+	check(loadScene(empty, 0).error == empty + ": the scene has no shapes", "a scene without shapes is an error");
 
 	const std::string fine = writeScene("fine", "function ball(r) {\n\treturn length(p) - r;\n}\n\nball(1);\n");
-	check(loadScene(fine).error.empty(), "a load after a failed one starts clean");
+	check(loadScene(fine, 0).error.empty(), "a load after a failed one starts clean");
+}
+
+std::string ballText(const std::string& body) {
+	return "function ball(r) {\n\treturn length(p) - r;\n}\n\n" + body;
+}
+
+double placedX(const std::string& name, const std::string& stops, const std::string& at) {
+	const std::string text = ballText("let s = " + stops + ";\nat([" + at + ", 0, 0]) ball(1);\n");
+	return sceneOrExit(writeScene(name.c_str(), text.c_str())).scene.leaves[0].placement.origin[0];
+}
+
+void checkTime() {
+	const std::string timed = writeScene("timed", ballText("at([time, 0, 0]) ball(1);\n").c_str());
+	const SceneFile still   = sceneOrExit(timed);
+	const SceneFile moved   = sceneAtOrExit(timed, 2.5);
+	check(still.scene.leaves[0].placement.origin[0] == 0 && moved.scene.leaves[0].placement.origin[0] == 2.5, "a scene's time is 0, or the number it is loaded at");
+	check(still.timed && !sceneOrExit(writeScene("untimed", ballText("ball(1);\n").c_str())).timed, "the load notes whether the file read time");
+
+	const std::string changed = writeScene("changed", ballText("let time = 1;\nball(1);\n").c_str());
+	check(loadScene(changed, 0).error == changed + ":5:1: time belongs to the clip and cannot be changed", "let time is an error");
+}
+
+void checkClip() {
+	const SceneFile clipped = sceneOrExit(writeScene("clipped", ballText("clip {\n\tduration = 12.8;\n\trate     = 24;\n\tcuts     = [4.8, 8.8];\n}\n\nclip {\n\tball(1);\n\tat([0.5, 0, 0]) ball(1);\n}\n").c_str()));
+	const Clip& clip        = clipped.shot.clip;
+	check(clip.duration == 12.8 && clip.rate == 24 && clip.cuts == std::vector<double> { 4.8, 8.8 } && clipFrames(clip) == 307, "a clip block holds its duration, rate and cuts, and has round(duration * rate) frames");
+	check(clipped.scene.leaves.size() == 2 && sceneOrExit(writeScene("unclipped", ballText("ball(1);\n").c_str())).shot.clip.duration == 0, "clip with statements stays a join, and a file without a clip block is a still");
+
+	const std::string falling = writeScene("falling", ballText("clip {\n\tduration = 4;\n\tcuts     = [3, 2];\n}\n\nball(1);\n").c_str());
+	check(!loadScene(falling, 0).error.empty(), "a clip's cuts rise");
+}
+
+void checkStops() {
+	const std::string line = "[[0, 0], [2, 4], [3, 4], [3, 10]]";
+	check(placedX("before", line, "linear(s, -1)") == 0 && placedX("between", line, "linear(s, 1)") == 2 && placedX("past", line, "linear(s, 9)") == 10, "linear joins the stops by straight lines, the first before them and the last past them");
+	check(placedX("leading", line, "linear(s, 2.99)") == 4 && placedX("jumped", line, "linear(s, 3)") == 10, "two stops of one time are a jump");
+	const std::string curve = "[[0, 0], [1, 1], [2, 2], [3, 0]]";
+	check(placedX("through", curve, "smooth(s, 1)") == 1 && std::abs(placedX("straight", "[[0, 0], [1, 1], [2, 2]]", "smooth(s, 0.5)") - 0.5) < 1e-12, "smooth passes through every stop and follows a straight run");
+	check(placedX("bends", curve, "smooth(s, 2.5)") > placedX("cornered", curve, "linear(s, 2.5)"), "smooth turns no corner at a stop");
+	check(placedX("vector", "[[0, 1, 2], [1, 3, 6]]", "linear(s, 0.5)[1]") == 4, "a stop of several values gives a vector");
+}
+
+void checkCompared() {
+	const std::string text = ballText("light point {\n\tat    = [0, 0, 3];\n\tpower = [1, 1, 1] * (1 + time);\n}\n\npaint(matte([0.5, 0.5, 0.5] * (1 + select(time > 2, 1, 0)))) at([0, 0, select(time > 4, 1, 0)]) ball(1);\n");
+	const std::string path = writeScene("compared", text.c_str());
+	const SceneFile start  = sceneOrExit(path);
+	const SceneFile lit    = sceneAtOrExit(path, 1);
+	const SceneFile looked = sceneAtOrExit(path, 3);
+	const SceneFile moved  = sceneAtOrExit(path, 5);
+	check(sameShapes(start.scene, lit.scene) && sameLooks(start.looks, lit.looks) && !sameLighting(start.lighting, lit.lighting), "a light that changes leaves the shapes and the looks the same");
+	check(sameShapes(start.scene, looked.scene) && !sameLooks(start.looks, looked.looks), "a material that changes leaves the shapes the same");
+	check(!sameShapes(start.scene, moved.scene) && sameShapes(moved.scene, sceneAtOrExit(path, 6).scene), "a shape that moves changes the shapes, and the same evaluation twice compares equal");
 }
 
 void checkLanguage() {
@@ -317,6 +370,10 @@ void checkLanguage() {
 	checkAbsoluteImport();
 	checkRenderCaps();
 	checkLoadErrors();
+	checkTime();
+	checkClip();
+	checkStops();
+	checkCompared();
 }
 
 }

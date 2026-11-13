@@ -645,6 +645,9 @@ bool isSetting(const Parser& parser) {
 	if (isOneOf(token, { "render", "camera", "grade", "clouds", "stars" })) {
 		return isSymbol(peekToken(parser, 1), "{");
 	}
+	if (isName(token, "clip")) {
+		return isSymbol(peekToken(parser, 1), "{") && peekToken(parser, 2).kind == TokenKind::Name && isSymbol(peekToken(parser, 3), "=");
+	}
 	return isOneOf(token, { "sky", "light" }) && isSymbol(peekToken(parser, 2), "{");
 }
 

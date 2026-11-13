@@ -1,12 +1,14 @@
-#include "frame/sequence.h"
 #include "check.h"
-#include "extras/reconstruction_biased_upsample/upsample.h"
-#include "frame/execution.h"
-#include "frame/frame.h"
-#include "frame/run.h"
-#include "frame/shown.h"
-#include "transport/camera.h"
-#include "transport/feature.h"
+#include "core/frame.h"
+#include "core/history.h"
+#include "core/pixels.h"
+#include "core/plugin.h"
+#include "core/shown.h"
+#include "plugins/reconstruction/upsample/upsample.h"
+#include "plugins/strategy/join/pass.h"
+#include "plugins/transport/paths/camera.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/paths.h"
 
 #include <cmath>
 #include <cstdio>
@@ -18,7 +20,7 @@ namespace kodanuki {
 struct SequenceScene {
 	const SceneFile& file;
 	const Geometry& geometry;
-	const Features& features;
+	const PathsWorld& paths;
 };
 
 bool sameBytes(const void* a, const void* b, std::size_t size) {
@@ -29,165 +31,12 @@ bool sameColour(const Colour& a, const Colour& b) {
 	return sameBytes(&a, &b, sizeof(Colour));
 }
 
-bool sameEstimate(const Estimate& a, const Estimate& b) {
-	const bool sums = sameColour(a.total, b.total) && sameColour(a.batch, b.batch) && sameColour(a.means, b.means) && sameColour(a.squares, b.squares);
-	return sums && a.taken == b.taken && a.batches == b.batches;
-}
-
-bool sameFirstSurface(const Surface& a, const Surface& b) {
-	const bool lengths = sameBytes(&a.distance, &b.distance, sizeof(float)) && sameBytes(&a.onward, &b.onward, sizeof(float));
-	const bool looks   = sameColour(a.albedo, b.albedo) && sameBytes(&a.roughness, &b.roughness, sizeof(float));
-	return lengths && looks && sameBytes(&a.normal, &b.normal, sizeof(math::Vector)) && a.leaf == b.leaf && a.material == b.material;
-}
-
-bool sameSampleRecord(const Recorded& a, const Recorded& b) {
-	return sameColour(a.parts.total, b.parts.total) && sameFirstSurface(a.surface, b.surface);
-}
-
-bool sameEstimates(const std::vector<Estimate>& a, const std::vector<Estimate>& b) {
-	if (a.size() != b.size()) {
-		return false;
-	}
-	for (std::size_t k = 0; k < a.size(); ++k) {
-		if (!sameEstimate(a[k], b[k])) {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool sameRecords(const std::vector<Recorded>& a, const std::vector<Recorded>& b) {
-	if (a.size() != b.size()) {
-		return false;
-	}
-	for (std::size_t k = 0; k < a.size(); ++k) {
-		if (!sameSampleRecord(a[k], b[k])) {
-			return false;
-		}
-	}
-	return true;
-}
-
-int sequenceCount(int x, int y) {
-	return (x * 7 + y) % 5 == 0 ? 0 : 1 + x % 2;
-}
-
-std::vector<PixelJob> sequenceJobs(const Lens& lens, int batch) {
-	std::vector<PixelJob> jobs;
-	for (int y = 0; y < lens.height; ++y) {
-		for (int x = 0; x < lens.width; ++x) {
-			const PixelJob job = {
-				.x     = x,
-				.y     = y,
-				.first = (x + y) % 3,
-				.count = sequenceCount(x, y),
-				.start = emptyEstimate(),
-				.batch = batch,
-				.split = 1,
-				.group = (x + y) % 3,
-			};
-
-			jobs.push_back(job);
-		}
-	}
-	return jobs;
-}
-
-struct JobsRun {
-	ExecutionMember execution;
-	bool recording;
-};
-
-struct JobsDrawn {
-	RecordedJobs recorded;
-	std::vector<Estimate> executed;
-};
-
-JobsDrawn drawnJobs(const SequenceScene& scene, const JobsRun& run) {
-	const Prepared chosen                     = defaultPrepared();
-	const std::vector<PreparationMember> none = {};
-	const Lens lens                           = lensOf(scene.file.shot.camera, scene.file.shot.render);
-	Progress progress                         = freshProgress();
-
-	const FrameInput input = {
-		.geometry     = scene.geometry,
-		.looks        = scene.file.looks,
-		.lighting     = scene.file.lighting,
-		.shot         = scene.file.shot,
-		.lens         = lens,
-		.chosen       = chosen,
-		.preparations = none,
-		.features     = scene.features,
-		.stopping     = StoppingMember::FixedCount,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = run.execution,
-		.threads      = 1,
-		.progress     = progress,
-	};
-
-	const FrameBasis basis  = frameBasis(input);
-	const Prepared prepared = preparedFrame(input, basis);
-	Tracing tracing         = frameTracing(input, basis, prepared);
-	tracing.recording       = run.recording;
-
-	const Execution execution = {
-		.member  = run.execution,
-		.tracing = tracing,
-	};
-
-	const std::vector<PixelJob> jobs = sequenceJobs(lens, basis.stopping.batch);
-	return JobsDrawn {
-		.recorded = recordedJobs(execution, jobs),
-		.executed = executedJobs(execution, jobs),
-	};
-}
-
-int metSurfaces(const std::vector<Recorded>& records) {
-	int met = 0;
-	for (const Recorded& record : records) {
-		const bool hit = record.surface.leaf != noLeaf && std::isfinite(record.surface.distance) && record.surface.distance > 0;
-		met += hit ? 1 : 0;
-	}
-	return met;
-}
-
-bool recordFits(const Recorded& record, const Estimate& estimate, int count) {
-	if (count == 0) {
-		return record.surface.leaf == noLeaf && estimate.taken == 0;
-	}
-	return count != 1 || sameColour(record.parts.total, estimate.total);
-}
-
-bool recordsFit(const RecordedJobs& recorded, int width) {
-	for (std::size_t k = 0; k < recorded.records.size(); ++k) {
-		const int x = int(k) % width;
-		const int y = int(k) / width;
-		if (!recordFits(recorded.records[k], recorded.estimates[k], sequenceCount(x, y))) {
-			return false;
-		}
-	}
-	return true;
-}
-
-void checkRecords(const char* path, const SequenceScene& scene) {
-	const JobsDrawn one   = drawnJobs(scene, JobsRun { ExecutionMember::OneAtATime, true });
-	const JobsDrawn waves = drawnJobs(scene, JobsRun { ExecutionMember::Waves, true });
-	const JobsDrawn still = drawnJobs(scene, JobsRun { ExecutionMember::Waves, false });
-	const int met         = metSurfaces(one.recorded.records);
-	const bool same       = sameRecords(one.recorded.records, waves.recorded.records);
-	std::printf("sequence %s: records of waves %s one at a time, %d of %zu pixels met a surface\n", path, same ? "equal" : "differ from", met, one.recorded.records.size());
-	check(same && sameEstimates(one.recorded.estimates, waves.recorded.estimates), "waves record each pixel's last sample as one path at a time does, to the byte");
-	check(sameEstimates(one.recorded.estimates, still.executed) && sameEstimates(waves.recorded.estimates, waves.executed), "recording leaves every estimate as a frame that records nothing draws it");
-	check(met > 0 && recordsFit(one.recorded, scene.file.shot.render.width), "a record keeps its sample's colour and the first surface its camera ray met, and a job of no samples a miss");
-}
-
 constexpr int stillFrames = 6;
 
 struct SequenceSetup {
 	Shot shot;
 	Lens lens;
-	Prepared chosen;
-	std::vector<PreparationMember> preparations;
+	std::vector<Plugin> preparations;
 };
 
 SequenceSetup sequenceSetup(const SceneFile& file) {
@@ -197,8 +46,7 @@ SequenceSetup sequenceSetup(const SceneFile& file) {
 	return SequenceSetup {
 		.shot         = shot,
 		.lens         = lensOf(shot.camera, shot.render),
-		.chosen       = defaultPrepared(),
-		.preparations = defaultPreparations(),
+		.preparations = testPreparations(defaultPreparations()),
 	};
 }
 
@@ -206,44 +54,36 @@ struct SequenceFrame {
 	const SequenceScene& scene;
 	const SequenceSetup& setup;
 	const Lens& lens;
-	ExecutionMember execution;
-	const std::vector<ReconstructionMember>& reconstruction;
+	std::string execution;
+	const std::vector<Plugin>& reconstruction;
+	int perFrame;
 };
 
-FrameInput sequenceFrameInput(const SequenceFrame& frame, Progress& progress) {
+FrameInput sequenceFrameInput(const SequenceFrame& frame, const Observing& observing) {
 	return FrameInput {
-		.geometry     = frame.scene.geometry,
-		.looks        = frame.scene.file.looks,
-		.lighting     = frame.scene.file.lighting,
-		.shot         = frame.setup.shot,
-		.lens         = frame.lens,
-		.chosen       = frame.setup.chosen,
-		.preparations = frame.setup.preparations,
-		.features     = frame.scene.features,
-		.stopping     = StoppingMember::FixedCount,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = frame.execution,
-		.threads      = 4,
-		.progress     = progress,
+		.geometry       = frame.scene.geometry,
+		.looks          = frame.scene.file.looks,
+		.lighting       = frame.scene.file.lighting,
+		.shot           = frame.setup.shot,
+		.lens           = frame.lens,
+		.transport      = testPlugin("transport/paths"),
+		.transportWorld = &frame.scene.paths,
+		.preparations   = frame.setup.preparations,
+		.stopping       = testPlugin("stopping/fixed_count"),
+		.perFrame       = frame.perFrame,
+		.execution      = frame.execution,
+		.threads        = 4,
+		.observing      = observing,
 	};
 }
 
-Stepped sequenceStepped(const SequenceFrame& frame, const FrameStep& step, const History& history) {
-	Progress progress      = freshProgress();
-	const FrameInput input = sequenceFrameInput(frame, progress);
-
-	const SequenceInput sequence = {
-		.frame          = input,
-		.step           = step,
-		.reconstruction = frame.reconstruction,
-		.surfaced       = false,
-	};
-
-	return steppedFrame(sequence, history);
+Framed sequenceFramed(const SequenceFrame& frame, const FrameStep& step, const History& history) {
+	const Observing observing = noObserving();
+	return framedBy(sequenceFrameInput(frame, observing), step, frame.reconstruction, history);
 }
 
 struct StillSequence {
-	Stepped last;
+	Framed last;
 	FrameStep step;
 };
 
@@ -255,11 +95,11 @@ StillSequence stillSequence(const SequenceFrame& frame) {
 		.keepsGuides = false,
 	};
 
-	FrameStep step  = firstStep(query);
-	Stepped stepped = sequenceStepped(frame, step, emptyHistory());
+	FrameStep step = firstStep(query);
+	Framed stepped = sequenceFramed(frame, step, emptyHistory());
 	for (int f = 1; f < stillFrames; ++f) {
 		step    = nextStep(step, query);
-		stepped = sequenceStepped(frame, step, stepped.history);
+		stepped = sequenceFramed(frame, step, stepped.history);
 	}
 	return StillSequence {
 		.last = stepped,
@@ -271,25 +111,28 @@ bool sameImage(const Image& a, const Image& b) {
 	return a.width == b.width && a.height == b.height && a.rgb.size() == b.rgb.size() && sameBytes(a.rgb.data(), b.rgb.data(), a.rgb.size() * sizeof(float));
 }
 
-bool sameFrameRecord(const FrameRecord& a, const FrameRecord& b) {
-	if (a.width != b.width || a.height != b.height || a.parts.size() != b.parts.size() || a.surfaces.size() != b.surfaces.size()) {
-		return false;
-	}
-	for (std::size_t k = 0; k < a.parts.size(); ++k) {
-		if (!sameColour(a.parts[k].total, b.parts[k].total) || !sameFirstSurface(a.surfaces[k], b.surfaces[k])) {
-			return false;
-		}
-	}
-	return true;
-}
-
 bool sameGuideRow(const GuideRow& a, const GuideRow& b) {
 	const bool sized = a.heads.size() == b.heads.size() && a.lumps.size() == b.lumps.size();
 	return sized && sameBytes(a.heads.data(), b.heads.data(), a.heads.size() * sizeof(PackedGuide)) && sameBytes(a.lumps.data(), b.lumps.data(), a.lumps.size() * sizeof(PackedLump));
 }
 
+const HighlightGuides& guidesOf(History history) {
+	return highlightGuidesState(history.states);
+}
+
+History detachedHistory(History history) {
+	States kept                          = std::move(history.states);
+	history.states                       = States { .held = {} };
+	highlightGuidesState(history.states) = highlightGuidesState(kept);
+	skyChartState(history.states)        = skyChartState(kept);
+	glowCellsState(history.states)       = glowCellsState(kept);
+	mirrorBallsState(history.states)     = mirrorBallsState(kept);
+	carriedLightState(history.states)    = carriedLightState(kept);
+	return history;
+}
+
 bool guidesAnything(const History& history) {
-	for (const GuideRow& row : history.prepared.sampling.guides.rows) {
+	for (const GuideRow& row : guidesOf(history).rows) {
 		if (!row.heads.empty()) {
 			return true;
 		}
@@ -298,8 +141,8 @@ bool guidesAnything(const History& history) {
 }
 
 bool sameGuides(const History& a, const History& b) {
-	const HighlightGuides& x = a.prepared.sampling.guides;
-	const HighlightGuides& y = b.prepared.sampling.guides;
+	const HighlightGuides& x = guidesOf(a);
+	const HighlightGuides& y = guidesOf(b);
 	if (x.width != y.width || x.heads != y.heads || x.rows.size() != y.rows.size()) {
 		return false;
 	}
@@ -311,8 +154,8 @@ bool sameGuides(const History& a, const History& b) {
 	return true;
 }
 
-bool startedOver(const std::vector<Estimate>& estimates) {
-	for (const Estimate& estimate : estimates) {
+bool startedOver(const std::vector<PixelSum>& estimates) {
+	for (const PixelSum& estimate : estimates) {
 		if (estimate.taken != 1) {
 			return false;
 		}
@@ -326,7 +169,7 @@ Lens movedLens(const Lens& lens) {
 	return moved;
 }
 
-Stepped movedStep(const SequenceFrame& frame, const StillSequence& still, bool keepsGuides) {
+Framed movedStep(const SequenceFrame& frame, const StillSequence& still, bool keepsGuides) {
 	const Lens moved = movedLens(frame.lens);
 
 	const StepQuery query = {
@@ -342,47 +185,162 @@ Stepped movedStep(const SequenceFrame& frame, const StillSequence& still, bool k
 		.lens           = moved,
 		.execution      = frame.execution,
 		.reconstruction = frame.reconstruction,
+		.perFrame       = frame.perFrame,
 	};
 
-	return sequenceStepped(next, nextStep(still.step, query), still.last.history);
+	return sequenceFramed(next, nextStep(still.step, query), detachedHistory(still.last.history));
+}
+
+double sequenceDistance(const Image& a, const Image& b) {
+	double squares = 0;
+	for (std::size_t k = 0; k < a.rgb.size(); ++k) {
+		squares += double(a.rgb[k] - b.rgb[k]) * double(a.rgb[k] - b.rgb[k]);
+	}
+	return std::sqrt(squares / double(a.rgb.size()));
+}
+
+double sequenceMean(const Image& image) {
+	double total = 0;
+	for (const float value : image.rgb) {
+		total += double(value);
+	}
+	return total / double(image.rgb.size());
+}
+
+bool sequenceWithinNoise(const Framed& a, const Framed& b, double noise) {
+	const double pixels = double(a.image.rgb.size()) / 3.0;
+	const bool noisy    = sequenceDistance(a.image, b.image) <= 1.25 * noise;
+	const bool unbiased = std::abs(sequenceMean(a.image) - sequenceMean(b.image)) <= 4.0 * noise / std::sqrt(pixels);
+	const bool effort   = std::abs(a.samples - b.samples) <= 0.1 * a.samples;
+	return a.image.rgb.size() == b.image.rgb.size() && noisy && unbiased && effort;
+}
+
+Framed reseededStill(const SequenceFrame& frame) {
+	SequenceSetup setup = frame.setup;
+	setup.shot.render.seed += 1;
+
+	const SequenceFrame other = {
+		.scene          = frame.scene,
+		.setup          = setup,
+		.lens           = frame.lens,
+		.execution      = frame.execution,
+		.reconstruction = frame.reconstruction,
+		.perFrame       = 0,
+	};
+
+	const Observing observing = noObserving();
+	return stillFrame(sequenceFrameInput(other, observing));
+}
+
+bool sameSums(const std::vector<PixelSum>& a, const std::vector<PixelSum>& b) {
+	if (a.size() != b.size()) {
+		return false;
+	}
+	for (std::size_t k = 0; k < a.size(); ++k) {
+		const double apart = std::abs(a[k].total.red - b[k].total.red) + std::abs(a[k].total.green - b[k].total.green) + std::abs(a[k].total.blue - b[k].total.blue);
+		if (a[k].taken != b[k].taken || apart > 1e-5 * (1 + std::abs(a[k].total.green))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int sameLeaves(const FrameRecord& a, const FrameRecord& b) {
+	int same = 0;
+	for (std::size_t k = 0; k < a.surfaces.size() && k < b.surfaces.size(); ++k) {
+		same += a.surfaces[k].leaf == b.surfaces[k].leaf ? 1 : 0;
+	}
+	return same;
+}
+
+int metFirsts(const FrameRecord& record) {
+	int met = 0;
+	for (const Surface& surface : record.surfaces) {
+		met += surface.leaf != noLeaf ? 1 : 0;
+	}
+	return met;
+}
+
+void checkFrameRecords(const SequenceFrame& one, const SequenceFrame& waves, const History& unread) {
+	const std::vector<Plugin> temporal = testPlugins({ "reconstruction/temporal" });
+
+	const SequenceFrame readOne = {
+		.scene          = one.scene,
+		.setup          = one.setup,
+		.lens           = one.lens,
+		.execution      = one.execution,
+		.reconstruction = temporal,
+		.perFrame       = 1,
+	};
+
+	const SequenceFrame readWaves = {
+		.scene          = waves.scene,
+		.setup          = waves.setup,
+		.lens           = waves.lens,
+		.execution      = waves.execution,
+		.reconstruction = temporal,
+		.perFrame       = 1,
+	};
+
+	const FrameRecord byOne   = stillSequence(readOne).last.history.record;
+	const FrameRecord byWaves = stillSequence(readWaves).last.history.record;
+	const std::size_t pixels  = std::size_t(byOne.width) * std::size_t(byOne.height);
+	const bool filled         = byOne.parts.size() == pixels && byOne.surfaces.size() == pixels && byWaves.parts.size() == pixels && byWaves.surfaces.size() == pixels;
+	check(unread.record.width == byOne.width && unread.record.parts.empty() && unread.record.surfaces.empty(), "a frame whose Reconstruction members read no record keeps none");
+	check(filled && metFirsts(byOne) > 0, "a frame whose Reconstruction members read its record keeps each pixel's light and first surface");
+	check(filled && sameLeaves(byOne, byWaves) * 100 >= int(pixels) * 98, "a frame's record names the same first surfaces with either Execution member");
+	check(sameSums(stillSequence(readWaves).last.history.estimates, unread.estimates), "a frame that keeps its record leaves every pixel's samples as one that keeps none draws them");
 }
 
 void checkStillSequence(const char* path, const SequenceScene& scene) {
-	const SequenceSetup setup                     = sequenceSetup(scene.file);
-	const std::vector<ReconstructionMember> means = defaultReconstruction();
+	const SequenceSetup setup       = sequenceSetup(scene.file);
+	const std::vector<Plugin> means = testPlugins({ "reconstruction/mean" });
 
 	const SequenceFrame one = {
 		.scene          = scene,
 		.setup          = setup,
 		.lens           = setup.lens,
-		.execution      = ExecutionMember::OneAtATime,
+		.execution      = "execution/single",
 		.reconstruction = means,
+		.perFrame       = 1,
 	};
 
 	const SequenceFrame waves = {
 		.scene          = scene,
 		.setup          = setup,
 		.lens           = setup.lens,
-		.execution      = ExecutionMember::Waves,
+		.execution      = "execution/packets",
 		.reconstruction = means,
+		.perFrame       = 1,
 	};
 
-	Progress progress           = freshProgress();
-	const Rendered still        = renderFrame(sequenceFrameInput(waves, progress));
+	const SequenceFrame whole = {
+		.scene          = scene,
+		.setup          = setup,
+		.lens           = setup.lens,
+		.execution      = "execution/packets",
+		.reconstruction = means,
+		.perFrame       = 0,
+	};
+
+	const Observing observing   = noObserving();
+	const Framed still          = stillFrame(sequenceFrameInput(whole, observing));
+	const Framed again          = reseededStill(whole);
 	const StillSequence byOne   = stillSequence(one);
 	const StillSequence byWaves = stillSequence(waves);
-	const bool same             = sameImage(byOne.last.image, still.image) && sameImage(byWaves.last.image, still.image);
-	std::printf("sequence %s: %d still frames with Mean %s a still frame of %d samples\n", path, stillFrames, same ? "equal" : "differ from", stillFrames);
-	check(same, "a sequence of still frames with Mean shows the still frame of as many samples, to the byte, with either Execution member");
-	check(sameFrameRecord(byOne.last.history.record, byWaves.last.history.record), "a sequence's records are the same to the byte with either Execution member");
+	const double noise          = sequenceDistance(still.image, again.image);
+	const bool same             = sequenceWithinNoise(still, byOne.last, noise) && sequenceWithinNoise(still, byWaves.last, noise);
+	std::printf("sequence %s: %d still frames of one sample with Mean are %s one frame of %d samples, %.4g and %.4g apart at a noise of %.4g between two seeds\n", path, stillFrames, same ? "within noise of" : "apart from", stillFrames, sequenceDistance(still.image, byOne.last.image), sequenceDistance(still.image, byWaves.last.image), noise);
+	check(noise > 0 && same, "frames of one sample on a still camera with Mean show the one frame of as many samples within noise, with either Execution member");
+	checkFrameRecords(one, waves, byWaves.last.history);
 
-	const Stepped moved = movedStep(waves, byWaves, false);
+	const Framed moved = movedStep(waves, byWaves, false);
 	check(startedOver(moved.history.estimates) && !sameImage(moved.image, still.image), "a moved camera starts every pixel's estimate over");
 
 	if (!guidesAnything(byWaves.last.history)) {
 		return;
 	}
-	const Stepped guided = movedStep(waves, byWaves, true);
+	const Framed guided = movedStep(waves, byWaves, true);
 	check(!sameGuides(moved.history, byWaves.last.history), "a moved camera surveys its guides again");
 	check(sameGuides(guided.history, byWaves.last.history) && startedOver(guided.history.estimates), "a moved camera that keeps its guides keeps the frame before's and starts every estimate over");
 }
@@ -403,8 +361,8 @@ StepQuery filmQuery(const Lens& lens, FilmPlan film) {
 	};
 }
 
-bool takenEach(const std::vector<Estimate>& estimates, int taken) {
-	for (const Estimate& estimate : estimates) {
+bool takenEach(const std::vector<PixelSum>& estimates, int taken) {
+	for (const PixelSum& estimate : estimates) {
 		if (estimate.taken != taken) {
 			return false;
 		}
@@ -413,58 +371,63 @@ bool takenEach(const std::vector<Estimate>& estimates, int taken) {
 }
 
 void checkFactorSequence(const SequenceScene& scene) {
-	const SequenceSetup setup                         = sequenceSetup(scene.file);
-	const Lens half                                   = halvedLens(setup);
-	const std::vector<ReconstructionMember> upsampled = { ReconstructionMember::Mean, ReconstructionMember::Upsample };
-	const std::vector<ReconstructionMember> means     = defaultReconstruction();
+	const SequenceSetup setup           = sequenceSetup(scene.file);
+	const Lens half                     = halvedLens(setup);
+	const std::vector<Plugin> upsampled = testPlugins({ "reconstruction/mean", "reconstruction/upsample" });
+	const std::vector<Plugin> means     = testPlugins({ "reconstruction/mean" });
 
 	const SequenceFrame halved = {
 		.scene          = scene,
 		.setup          = setup,
 		.lens           = half,
-		.execution      = ExecutionMember::Waves,
+		.execution      = "execution/packets",
 		.reconstruction = upsampled,
+		.perFrame       = 1,
 	};
 
 	const SequenceFrame whole = {
 		.scene          = scene,
 		.setup          = setup,
 		.lens           = setup.lens,
-		.execution      = ExecutionMember::Waves,
+		.execution      = "execution/packets",
 		.reconstruction = means,
+		.perFrame       = 1,
 	};
 
 	const FrameStep first  = firstStep(filmQuery(half, bayerFilm(2, 0)));
-	const Stepped one      = sequenceStepped(halved, first, emptyHistory());
+	const Framed one       = sequenceFramed(halved, first, emptyHistory());
 	const FrameStep second = nextStep(first, filmQuery(half, bayerFilm(2, 1)));
-	const Stepped two      = sequenceStepped(halved, second, one.history);
+	const Framed two       = sequenceFramed(halved, second, one.history);
 	const FrameStep third  = nextStep(second, filmQuery(setup.lens, bayerFilm(1, 2)));
-	const Stepped three    = sequenceStepped(whole, third, two.history);
+	const Framed three     = sequenceFramed(whole, third, two.history);
 	const bool shownSize   = two.image.width == setup.lens.width && two.image.height == setup.lens.height;
 	check(shownSize && two.history.record.width == half.width && takenEach(two.history.estimates, 2), "a frame at a factor of 2 draws at half the size, shows the full size, and its next phase continues every drawn estimate");
 	check(three.image.width == setup.lens.width && startedOver(three.history.estimates), "a new factor at the same shown size starts every estimate over");
 }
 
 void checkSequenceScene(const char* path) {
-	SceneFile file           = sceneOrExit(path);
-	file.shot.render.width   = 48;
-	file.shot.render.height  = 30;
-	file.shot.render.samples = 4;
-	const TestTree tree      = testTree(file, 8);
-	const Features features  = featuresOf(featureQueryOf(file, 1));
+	SceneFile file             = sceneOrExit(path);
+	file.shot.render.width     = 48;
+	file.shot.render.height    = 30;
+	file.shot.render.samples   = 4;
+	const TestTree tree        = testTree(file, 8);
+	const ChosenMembers chosen = defaultChosen();
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree.tree,
+	const PathsWorld paths = {
+		.features    = featuresOf(featureQueryOf(file, 1)),
+		.smoothGlass = SmoothGlass::Exact,
+		.sampling    = chosen.sampling,
+		.strategies  = chosen.strategies,
 	};
+
+	const Geometry geometry = treeGeometry(file.scene, tree.tree);
 
 	const SequenceScene scene = {
 		.file     = file,
 		.geometry = geometry,
-		.features = features,
+		.paths    = paths,
 	};
 
-	checkRecords(path, scene);
 	checkStillSequence(path, scene);
 	checkFactorSequence(scene);
 }
@@ -487,7 +450,7 @@ Lens flatLens(int width, int height) {
 struct ShownTest {
 	Lens lens;
 	FrameRecord record;
-	std::vector<Estimate> estimates;
+	std::vector<PixelSum> estimates;
 };
 
 ShownTest shownTest(int width, int height, int factor) {
@@ -510,6 +473,7 @@ ShownFrame shownTestFrame(const ShownTest& test, FilmPlan film) {
 		.film      = film,
 		.moved     = false,
 		.restarted = false,
+		.recounted = false,
 		.still     = 0,
 		.record    = test.record,
 		.estimates = test.estimates,

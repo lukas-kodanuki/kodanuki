@@ -1,11 +1,11 @@
-#include "tree/face.h"
+#include "plugins/geometry/tree/face.h"
 #include "check.h"
-#include "frame/run.h"
+#include "plugins/geometry/tree/build.h"
+#include "plugins/geometry/tree/cut.h"
+#include "plugins/geometry/tree/quadric.h"
+#include "plugins/transport/paths/paths.h"
 #include "sdf/scene.h"
 #include "syntax/evaluator.h"
-#include "tree/build.h"
-#include "tree/cut.h"
-#include "tree/quadric.h"
 
 #include <algorithm>
 #include <array>

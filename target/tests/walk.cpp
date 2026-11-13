@@ -1,13 +1,14 @@
-#include "walk/walk.h"
+#include "plugins/geometry/tree/walk.h"
 #include "check.h"
-#include "extras/build_correct_face_slabs/face_slabs.h"
-#include "frame/frame.h"
-#include "frame/run.h"
+#include "core/frame.h"
+#include "plugins/build/face_slabs/face_slabs.h"
+#include "plugins/geometry/sphere_trace/sphere_trace.h"
+#include "plugins/geometry/tree/build.h"
+#include "plugins/geometry/tree/leaf.h"
+#include "plugins/geometry/tree/tree.h"
+#include "plugins/transport/paths/paths.h"
 #include "sdf/scene.h"
 #include "syntax/evaluator.h"
-#include "tree/build.h"
-#include "tree/tree.h"
-#include "walk/leaf.h"
 
 #include <algorithm>
 #include <array>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <random>
 #include <thread>
 #include <vector>
@@ -126,7 +128,7 @@ double patchSlack(const Model& model, const Hit& hit) {
 	if (hit.cell == noLeaf) {
 		return 1;
 	}
-	return runHeader(model.geometry.tree.runs[model.geometry.tree.surfaces[hit.cell].run]).patches != 0 ? 1.25 : 1;
+	return runHeader(treeOf(model.geometry).runs[treeOf(model.geometry).surfaces[hit.cell].run]).patches != 0 ? 1.25 : 1;
 }
 
 void scoreLeaf(Score& score, const Model& model, const Hit& hit, const Place& p) {
@@ -281,6 +283,41 @@ Score scoreSamples(const Model& model, const std::vector<Sample>& samples) {
 	return score;
 }
 
+struct TracedScore {
+	std::size_t hits;
+	std::size_t off;
+	std::size_t apart;
+	std::size_t unsourced;
+};
+
+void scoreTraced(TracedScore& score, const Model& model, const Geometry& traced, const Sample& sample) {
+	const Hit hit = intersect(traced, sample.ray);
+	if (hit.kind == HitKind::Missed) {
+		score.apart += sample.truth.found ? 1 : 0;
+		return;
+	}
+	score.hits += 1;
+	score.off += std::abs(modelDistance(model, rayPoint(sample.ray, hit.distance))) <= sphereTolerance + std::numeric_limits<float>::epsilon() * hit.distance ? 0 : 1;
+	score.apart += sample.truth.found && std::abs(hit.distance - sample.truth.t) > 1e-3 ? 1 : 0;
+	score.unsourced += hit.leaf == noLeaf || hit.leaf >= model.scene.leaves.size() ? 1 : 0;
+}
+
+void checkSphereTrace(const char* path, const Model& model, const std::vector<Sample>& samples) {
+	const Geometry traced = sphereGeometry(model.scene, treeOf(model.geometry).region);
+	std::vector<TracedScore> scores(samples.size(), TracedScore { .hits = 0, .off = 0, .apart = 0, .unsourced = 0 });
+	inParallel(samples.size(), [&](std::size_t i) {
+		scoreTraced(scores[i], model, traced, samples[i]);
+	});
+
+	TracedScore score = { .hits = 0, .off = 0, .apart = 0, .unsourced = 0 };
+	for (const TracedScore& one : scores) {
+		score = TracedScore { .hits = score.hits + one.hits, .off = score.off + one.off, .apart = score.apart + one.apart, .unsourced = score.unsourced + one.unsourced };
+	}
+	std::printf("walk %s: sphere tracing finds %zu hits; past the surface where the field oversteps %zu, apart from the true hit %zu, without a leaf %zu\n", path, score.hits, score.off, score.apart, score.unsourced);
+	check(score.hits > 1000 && score.off * 500 <= score.hits, "sphere-traced hits lie within the tracer's tolerance of the surface and the rounding of a float distance, but for the few rays the field oversteps on");
+	check(score.apart == 0 && score.unsourced == 0, "sphere tracing finds every true hit within a thousandth of where the model's march does, with its leaf");
+}
+
 void shiftFace(Tree& tree, std::uint32_t at, FaceKind kind) {
 	const std::uint32_t constant = at + (kind == FaceKind::Plane ? 3 : 9);
 	tree.runs[constant]          = std::bit_cast<std::uint32_t>(std::bit_cast<float>(tree.runs[constant]) + 0.05f);
@@ -317,10 +354,7 @@ void checkScene(const char* path) {
 	file.shot.render.height = 200;
 	const TestTree tree     = testTree(file, 8);
 
-	const Geometry geometry = {
-		.scene = scene,
-		.tree  = tree.tree,
-	};
+	const Geometry geometry = treeGeometry(scene, tree.tree);
 
 	const Model model = {
 		.scene    = scene,
@@ -336,13 +370,11 @@ void checkScene(const char* path) {
 	check(score.off == 0, "tree hits lie within the tolerance of the surface");
 	check(score.missed == 0 && score.late == 0, "every clear true hit is found, not late");
 	check(score.strays == 0 && score.farthest < 0.02, "hits carry the leaf they lie on (within a blend radius)");
+	checkSphereTrace(path, model, samples);
 
 	const Tree shrunk = shrunkTree(tree.tree);
 
-	const Geometry moved = {
-		.scene = scene,
-		.tree  = shrunk,
-	};
+	const Geometry moved = treeGeometry(scene, shrunk);
 
 	const Model mutated = {
 		.scene    = scene,
@@ -366,10 +398,7 @@ void checkExit() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	std::mt19937 random(4);
 	std::uniform_real_distribution<float> unit(-0.5f, 0.5f);
@@ -428,10 +457,7 @@ void checkLawn() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	int wrong = 0;
 	for (int k = 0; k < 41; ++k) {
@@ -473,10 +499,7 @@ void checkFar() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	const Hit hit = intersect(tree, pixelRay(lensOf(file.shot.camera, file.shot.render), 32, 20));
 
@@ -539,10 +562,7 @@ void checkStripe() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	const std::vector<Strip> strips = { { -0.4f, 0, 2 }, { 0.4f, 0.08f, 3 }, { -1.2f, 0, 0 }, { 0, 0, 0 }, { 1.2f, 0, 0 } };
 	const int wrong                 = wrongLeaves(tree, strips);
@@ -563,10 +583,7 @@ void checkGable() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	const float top = 3 + 4.5f / std::sqrt(2.0f);
 	int wrong       = 0;
@@ -619,10 +636,7 @@ void checkBlend() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	int wrong  = 0;
 	int tested = 0;
@@ -717,10 +731,7 @@ void checkEntryCrossing() {
 		.cutSteps   = {},
 	};
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, tree);
 
 	const Ray ray = {
 		.origin    = { -5, 1, 1 },
@@ -761,10 +772,7 @@ void checkThinSolid() {
 
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	int wrong = 0;
 	for (int k = 0; k < 64; ++k) {
@@ -877,10 +885,7 @@ int leakedRays(const char* name, const char* text) {
 	const SceneFile file = sceneOrExit(writeScene(name, text));
 	const TestTree built = testTree(file, 8);
 
-	const Geometry tree = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry tree = treeGeometry(file.scene, built.tree);
 
 	const std::uint32_t glass = file.scene.leaves[1].material;
 	int wrong                 = 0;

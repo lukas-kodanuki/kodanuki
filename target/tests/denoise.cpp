@@ -1,6 +1,6 @@
 #include "check.h"
-#include "extras/reconstruction_biased_atrous/atrous.h"
 #include "math/random.h"
+#include "plugins/reconstruction/atrous/atrous.h"
 #include "sdf/program.h"
 
 #include <cmath>
@@ -74,7 +74,7 @@ TemporalState denoiseState(const DenoiseField& field) {
 
 Denoised denoiseRun(DenoiseState before, const TemporalState& temporal) {
 	static const FrameRecord record = emptyFrameRecord();
-	static const std::vector<Estimate> estimates;
+	static const std::vector<PixelSum> estimates;
 	const Lens lens = denoiseLens(temporal.width, temporal.height);
 
 	const ShownFrame frame = {
@@ -90,6 +90,7 @@ Denoised denoiseRun(DenoiseState before, const TemporalState& temporal) {
 
 		.moved     = false,
 		.restarted = false,
+		.recounted = false,
 		.still     = 1,
 		.record    = record,
 		.estimates = estimates,
@@ -269,7 +270,7 @@ void checkStateReused() {
 
 Denoised halvedRun(const TemporalState& temporal) {
 	static const FrameRecord record = emptyFrameRecord();
-	static const std::vector<Estimate> estimates;
+	static const std::vector<PixelSum> estimates;
 	const Lens lens = denoiseLens(temporal.width * 2, temporal.height * 2);
 
 	const ShownFrame frame = {
@@ -280,6 +281,7 @@ Denoised halvedRun(const TemporalState& temporal) {
 		.film      = temporal.film,
 		.moved     = false,
 		.restarted = false,
+		.recounted = false,
 		.still     = 1,
 		.record    = record,
 		.estimates = estimates,

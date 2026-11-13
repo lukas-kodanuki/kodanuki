@@ -7,6 +7,5 @@ count() {
 		printf '%6d %s\n' "$n" "$f"
 	done | sort -rn
 }
-count source/*.cpp source/[!ev]*/*.h source/[!ev]*/*.cpp | awk '{ print; t += $1 } END { printf "%6d core\n", t }'
-count source/extras/*/*.h source/extras/*/*.cpp | awk '{ print; t += $1 } END { printf "%6d extras\n", t }'
-count source/viewer/*.h source/viewer/*.cpp | awk '{ print; t += $1 } END { printf "%6d viewer\n", t }'
+count source/*.cpp source/[!pv]*/*.h source/[!pv]*/*.cpp | awk '{ print; t += $1 } END { printf "%6d core\n", t }'
+count source/plugins/*/*/*.h source/plugins/*/*/*.cpp | awk '{ print; t += $1 } END { printf "%6d plugins\n", t }'

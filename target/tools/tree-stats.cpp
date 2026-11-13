@@ -1,12 +1,12 @@
-#include "frame/frame.h"
-#include "frame/run.h"
+#include "core/frame.h"
+#include "plugins/geometry/tree/build.h"
+#include "plugins/geometry/tree/detail.h"
+#include "plugins/geometry/tree/pass.h"
+#include "plugins/geometry/tree/tree.h"
+#include "plugins/geometry/tree/walk.h"
+#include "plugins/transport/paths/paths.h"
 #include "sdf/scene.h"
 #include "syntax/evaluator.h"
-#include "tree/build.h"
-#include "tree/detail.h"
-#include "tree/pass.h"
-#include "tree/tree.h"
-#include "walk/walk.h"
 
 #include <algorithm>
 #include <atomic>
@@ -28,7 +28,45 @@ constexpr double slopeStep = 1e-6;
 
 using Clock = std::chrono::steady_clock;
 
-struct Options {
+struct NormalsRow {
+	const Geometry& geometry;
+	const Lens& lens;
+	int y;
+};
+
+std::vector<float> normalsRow(const NormalsRow& row) {
+	std::vector<float> values(std::size_t(row.lens.width) * 3, 0.0f);
+	for (int x = 0; x < row.lens.width; ++x) {
+		const Hit hit  = intersect(row.geometry, pixelRay(row.lens, x, row.y));
+		const bool met = hit.kind != HitKind::Missed;
+		for (int i = 0; i < 3; ++i) {
+			values[std::size_t(x) * 3 + std::size_t(i)] = met ? float(math::component(hit.normal, i)) * 0.5f + 0.5f : 0.0f;
+		}
+	}
+	return values;
+}
+
+Image normalsImage(const Geometry& geometry, const Lens& lens, int threads) {
+	Image image           = blankImage(lens.width, lens.height);
+	std::atomic<int> next = 0;
+	const auto work       = [&]() {
+		for (int y = next++; y < lens.height; y = next++) {
+			const NormalsRow row = {
+				.geometry = geometry,
+				.lens     = lens,
+				.y        = y,
+			};
+
+			const std::vector<float> values = normalsRow(row);
+			std::copy(values.begin(), values.end(), image.rgb.begin() + std::ptrdiff_t(values.size()) * y);
+		}
+	};
+
+	inThreads(threads, work);
+	return image;
+}
+
+struct StatsOptions {
 	std::vector<DetailMember> members;
 	std::vector<PassMember> passes;
 	bool faces;
@@ -124,8 +162,8 @@ Region noRegion() {
 	};
 }
 
-Options optionsOf(int argc, char** argv, Shot& shot) {
-	Options options = {
+StatsOptions optionsOf(int argc, char** argv, Shot& shot) {
+	StatsOptions options = {
 		.members = defaultDetailMembers(),
 		.passes  = defaultPassMembers(),
 		.faces   = true,
@@ -152,7 +190,7 @@ Options optionsOf(int argc, char** argv, Shot& shot) {
 			const std::string use = argv[++i];
 			options.faces         = use == "faces=off" ? false : options.faces;
 			options.members       = use.rfind("detail=", 0) == 0 ? membersOf(use.substr(7)) : options.members;
-			options.passes        = use.rfind("passes=", 0) == 0 ? passesOf(use.substr(7)) : options.passes;
+			options.passes        = use.rfind("build=", 0) == 0 ? passesOf(use.substr(6)) : options.passes;
 		}
 		if (flag == "--region") {
 			for (int axis = 0; axis < 3; ++axis) {
@@ -271,7 +309,7 @@ bool goesDeep(const Model& model, const Ray& ray, double t) {
 }
 
 Truth traced(const Model& model, const Ray& ray) {
-	const double reach = 4 * (model.geometry.tree.region.size[0] + model.geometry.tree.region.size[1] + model.geometry.tree.region.size[2]);
+	const double reach = 4 * (treeOf(model.geometry).region.size[0] + treeOf(model.geometry).region.size[1] + treeOf(model.geometry).region.size[2]);
 	double t           = 0;
 	for (int i = 0; i < 20000 && t < reach; ++i) {
 		const double d = modelField(model, rayPoint(ray, t));
@@ -389,13 +427,13 @@ double raysPerSecond(const Geometry& geometry, const Lens& lens, int threads) {
 
 int main(int argc, char** argv) {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: kodanuki_tree_stats scene.sdf [--size w h] [--tolerance t] [--use faces=off] [--use detail=none|a+b...] [--use passes=none|a+b...] [--region lx ly lz hx hy hz] [--least e] [--depth n] [--threads n] [--normals out.ppm] [--trace rays] [--speed]\n");
+		std::fprintf(stderr, "usage: kodanuki_tree_stats scene.sdf [--size w h] [--tolerance t] [--use faces=off] [--use detail=none|a+b...] [--use build=none|a+b...] [--region lx ly lz hx hy hz] [--least e] [--depth n] [--threads n] [--normals out.ppm] [--trace rays] [--speed]\n");
 		return 1;
 	}
-	SceneFile file        = sceneOrExit(argv[1]);
-	const Scene& scene    = file.scene;
-	const Options options = optionsOf(argc, argv, file.shot);
-	std::size_t steps     = 0;
+	SceneFile file             = sceneOrExit(argv[1]);
+	const Scene& scene         = file.scene;
+	const StatsOptions options = optionsOf(argc, argv, file.shot);
+	std::size_t steps          = 0;
 	for (const Program& program : scene.objectPrograms) {
 		steps += program.steps.size();
 	}
@@ -432,10 +470,7 @@ int main(int argc, char** argv) {
 	printPrograms(scene, tree);
 	std::printf("peak resident %.1f MB\n", peakMegabytes());
 
-	const Geometry geometry = {
-		.scene = scene,
-		.tree  = tree,
-	};
+	const Geometry geometry = treeGeometry(scene, tree);
 
 	const Model model = {
 		.file     = file,

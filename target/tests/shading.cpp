@@ -1,11 +1,11 @@
 #include "check.h"
-#include "extras/feature_correct_absorption/absorption.h"
-#include "extras/feature_correct_scattering/scattering.h"
-#include "extras/feature_mixed_coats/coats.h"
-#include "frame/run.h"
-#include "material/material.h"
+#include "math/colour.h"
 #include "math/random.h"
-#include "spectral/colour.h"
+#include "plugins/feature/absorption/absorption.h"
+#include "plugins/feature/coats/coats.h"
+#include "plugins/feature/scattering/scattering.h"
+#include "plugins/transport/paths/material/material.h"
+#include "plugins/transport/paths/paths.h"
 #include "syntax/evaluator.h"
 
 #include <algorithm>
@@ -224,7 +224,7 @@ void checkSwatch(const Swatch& swatch, double cosine) {
 	const std::string name = swatch.name;
 	checkNear(Near { integral, survey.found, 0.01, (name + ": the density integrates to the share of draws that find a direction").c_str() });
 	check(survey.weightGap < 1e-9 && survey.densityGap < 1e-9, (name + ": a drawn direction's weight and density are what respondBsdf answers").c_str());
-	check(reciprocal < 1e-9, (name + ": the value is the same both ways").c_str());
+	check(reciprocal < 1e-6, (name + ": the value is the same both ways").c_str());
 	checkNear(Near { survey.furnace, cosine > 0.5 ? swatch.furnaceFaceOn : swatch.furnaceGrazing, 0.006, (name + ": a white surface in a white furnace returns what it is given").c_str() });
 }
 

@@ -1,6 +1,7 @@
-#include "extras/reconstruction_biased_upscale/upscale.h"
+#include "plugins/reconstruction/upscale/upscale.h"
 #include "check.h"
-#include "extras/reconstruction_biased_upsample/upsample.h"
+#include "plugins/reconstruction/upsample/upsample.h"
+#include "plugins/transport/paths/camera.h"
 
 #include <algorithm>
 #include <cmath>
@@ -133,7 +134,7 @@ UpscaleShot upscaleShot(const UpscaleWorld& world, const UpscaleStep& step) {
 }
 
 ShownFrame upscaleShown(const UpscaleShot& shot, const UpscaleStep& step) {
-	static const std::vector<Estimate> estimates;
+	static const std::vector<PixelSum> estimates;
 	return ShownFrame {
 		.width     = step.lens.width,
 		.height    = step.lens.height,
@@ -142,6 +143,7 @@ ShownFrame upscaleShown(const UpscaleShot& shot, const UpscaleStep& step) {
 		.film      = step.film,
 		.moved     = step.moved,
 		.restarted = step.restarted,
+		.recounted = false,
 		.still     = 1,
 		.record    = shot.record,
 		.estimates = estimates,

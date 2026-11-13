@@ -1,13 +1,14 @@
 #include "check.h"
-#include "extras/strategy_correct_join/join.h"
-#include "extras/strategy_correct_join/pass.h"
-#include "frame/frame.h"
-#include "frame/run.h"
-#include "material/microfacet.h"
+#include "core/frame.h"
+#include "core/plugin.h"
+#include "plugins/strategy/join/join.h"
+#include "plugins/strategy/join/pass.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/light_walk.h"
+#include "plugins/transport/paths/material/microfacet.h"
+#include "plugins/transport/paths/paths.h"
+#include "plugins/transport/paths/strategy.h"
 #include "syntax/evaluator.h"
-#include "transport/feature.h"
-#include "transport/light_walk.h"
-#include "transport/strategy.h"
 
 #include <cmath>
 #include <cstdio>
@@ -54,36 +55,40 @@ Image renderedFrame(const FrameAsk& ask) {
 	const SceneFile file = sceneOrExit(writeScene(ask.name, ask.text.c_str()));
 	const TestTree tree  = testTree(file, 8);
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree.tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, tree.tree);
 
-	Prepared chosen           = corePrepared();
+	ChosenMembers chosen      = coreChosen();
 	chosen.strategies.members = ask.strategies;
 
-	const std::vector<PreparationMember> preparations = {};
-	const Features features                           = featuresOf(featureQueryOf(file, 1));
-	const Lens lens                                   = lensOf(file.shot.camera, file.shot.render);
-	Progress progress                                 = freshProgress();
+	const std::vector<Plugin> preparations = {};
+	const Features features                = featuresOf(featureQueryOf(file, 1));
+	const Lens lens                        = lensOf(file.shot.camera, file.shot.render);
+	const Observing observing              = noObserving();
 
-	const FrameInput input = {
-		.geometry     = geometry,
-		.looks        = file.looks,
-		.lighting     = file.lighting,
-		.shot         = file.shot,
-		.lens         = lens,
-		.chosen       = chosen,
-		.preparations = preparations,
-		.features     = features,
-		.stopping     = StoppingMember::FixedCount,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = ExecutionMember::OneAtATime,
-		.threads      = ask.threads,
-		.progress     = progress,
+	const PathsWorld paths = {
+		.features    = features,
+		.smoothGlass = SmoothGlass::Exact,
+		.sampling    = chosen.sampling,
+		.strategies  = chosen.strategies,
 	};
 
-	return renderFrame(input).image;
+	const FrameInput input = {
+		.geometry       = geometry,
+		.looks          = file.looks,
+		.lighting       = file.lighting,
+		.shot           = file.shot,
+		.lens           = lens,
+		.transport      = testPlugin("transport/paths"),
+		.transportWorld = &paths,
+		.preparations   = preparations,
+		.stopping       = testPlugin("stopping/fixed_count"),
+		.perFrame       = 0,
+		.execution      = "execution/single",
+		.threads        = ask.threads,
+		.observing      = observing,
+	};
+
+	return stillFrame(input).image;
 }
 
 const char* sceneStart = R"(
@@ -362,10 +367,7 @@ void checkJoinLine() {
 	strategies.members.push_back(StrategyMember::Join);
 	strategies.lampShares = { 1 };
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree.tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, tree.tree);
 
 	const Tracing tracing = {
 		.geometry   = geometry,

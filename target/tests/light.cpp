@@ -1,10 +1,10 @@
-#include "light/light.h"
+#include "plugins/transport/paths/light/light.h"
 #include "check.h"
-#include "frame/run.h"
+#include "math/colour.h"
 #include "math/random.h"
-#include "spectral/colour.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/paths.h"
 #include "syntax/evaluator.h"
-#include "transport/feature.h"
 
 #include <cmath>
 #include <cstdio>

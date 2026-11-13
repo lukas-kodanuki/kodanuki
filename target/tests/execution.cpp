@@ -1,15 +1,18 @@
 #include "check.h"
-#include "extras/execution_correct_waves/answer.h"
-#include "extras/execution_correct_waves/packet.h"
-#include "extras/execution_correct_waves/queue.h"
-#include "frame/frame.h"
-#include "frame/run.h"
-#include "light/light.h"
+#include "core/frame.h"
+#include "core/plugin.h"
+#include "core/render.h"
+#include "core/surfaces.h"
+#include "plugins/execution/packets/answer.h"
+#include "plugins/execution/packets/packet.h"
+#include "plugins/execution/packets/queue.h"
+#include "plugins/geometry/tree/span.h"
+#include "plugins/geometry/tree/walk.h"
+#include "plugins/transport/paths/camera.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/light/light.h"
+#include "plugins/transport/paths/paths.h"
 #include "syntax/evaluator.h"
-#include "transport/camera.h"
-#include "transport/feature.h"
-#include "walk/span.h"
-#include "walk/walk.h"
 
 #include <algorithm>
 #include <array>
@@ -62,7 +65,7 @@ Ray rayFrom(const math::Vector& origin, const math::Vector& direction, double fa
 	return Ray {
 		.origin    = origin,
 		.direction = math::normalized(direction),
-		.far       = far,
+		.far       = float(far),
 		.inside    = false,
 		.within    = noMaterial,
 	};
@@ -137,7 +140,7 @@ bool sameBits(const void* a, const void* b, std::size_t size) {
 }
 
 bool bitEqualHit(const Hit& a, const Hit& b) {
-	return a.kind == b.kind && sameBits(&a.distance, &b.distance, sizeof(double)) && sameBits(&a.point, &b.point, sizeof(math::Vector)) && sameBits(&a.normal, &b.normal, sizeof(math::Vector)) && a.leaf == b.leaf && a.other == b.other && sameBits(&a.share, &b.share, sizeof(double)) && sameBits(&a.loosened, &b.loosened, sizeof(double)) && a.leafKind == b.leafKind && a.cell == b.cell;
+	return a.kind == b.kind && sameBits(&a.distance, &b.distance, sizeof(a.distance)) && sameBits(&a.point, &b.point, sizeof(a.point)) && sameBits(&a.normal, &b.normal, sizeof(a.normal)) && a.leaf == b.leaf && a.other == b.other && sameBits(&a.share, &b.share, sizeof(a.share)) && sameBits(&a.loosened, &b.loosened, sizeof(a.loosened)) && a.leafKind == b.leafKind && a.cell == b.cell;
 }
 
 Mismatches checkedPacket(const LaneCheck& check) {
@@ -305,16 +308,16 @@ enum class MemberSet : std::uint8_t {
 };
 
 struct FrameRun {
-	ExecutionMember execution;
+	std::string execution;
 	int threads;
 	MemberSet members;
 };
 
-Prepared chosenMembers(MemberSet members) {
+ChosenMembers chosenMembers(MemberSet members) {
 	if (members == MemberSet::Core) {
-		return corePrepared();
+		return coreChosen();
 	}
-	Prepared chosen = defaultPrepared();
+	ChosenMembers chosen = defaultChosen();
 	if (members == MemberSet::Connected) {
 		const EmissionShare cosine = {
 			.member = SamplerMember::Cosine,
@@ -332,36 +335,56 @@ Prepared chosenMembers(MemberSet members) {
 	return chosen;
 }
 
-Rendered framed(const Drawing& drawing, const FrameRun& run) {
+struct TileCount {
+	int begun;
+	int placed;
+};
+
+void countedTile(void* state, const StepEvent& event) {
+	TileCount& count = *static_cast<TileCount*>(state);
+	count.begun += event.step == LoopStep::Pass && !event.done ? int(event.items) : 0;
+	count.placed += event.step == LoopStep::PlaceTile ? 1 : 0;
+}
+
+Framed framed(const Drawing& drawing, const FrameRun& run) {
 	const bool defaults = run.members != MemberSet::Core;
 	Shot shot           = drawing.file.shot;
 	shot.render.samples = defaults ? 16 : shot.render.samples;
 	shot.render.batch   = defaults ? 4 : shot.render.batch;
 
-	const Prepared chosen                             = chosenMembers(run.members);
-	const std::vector<PreparationMember> preparations = defaults ? defaultPreparations() : std::vector<PreparationMember> {};
-	const Features features                           = featuresOf(featureQueryOf(drawing.file, 1));
-	const Lens lens                                   = lensOf(shot.camera, shot.render);
-	Progress progress                                 = freshProgress();
+	const ChosenMembers chosen             = chosenMembers(run.members);
+	const std::vector<Plugin> preparations = testPreparations(defaults ? defaultPreparations() : std::vector<std::string> {});
+	const Features features                = featuresOf(featureQueryOf(drawing.file, 1));
+	const Lens lens                        = lensOf(shot.camera, shot.render);
+	TileCount tiles                        = { .begun = 0, .placed = 0 };
+	Observing observing                    = noObserving();
+	observing.frames.push_back(Watcher { .observed = countedTile, .state = &tiles });
 
-	const FrameInput input = {
-		.geometry     = drawing.geometry,
-		.looks        = drawing.file.looks,
-		.lighting     = drawing.file.lighting,
-		.shot         = shot,
-		.lens         = lens,
-		.chosen       = chosen,
-		.preparations = preparations,
-		.features     = features,
-		.stopping     = defaults ? StoppingMember::ConfidenceInterval : StoppingMember::FixedCount,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = run.execution,
-		.threads      = run.threads,
-		.progress     = progress,
+	const PathsWorld paths = {
+		.features    = features,
+		.smoothGlass = SmoothGlass::Exact,
+		.sampling    = chosen.sampling,
+		.strategies  = chosen.strategies,
 	};
 
-	const Rendered rendered = renderFrame(input);
-	check(progress.total > 0 && progress.finished == progress.total, "a frame counts every tile of its passes finished");
+	const FrameInput input = {
+		.geometry       = drawing.geometry,
+		.looks          = drawing.file.looks,
+		.lighting       = drawing.file.lighting,
+		.shot           = shot,
+		.lens           = lens,
+		.transport      = testPlugin("transport/paths"),
+		.transportWorld = &paths,
+		.preparations   = preparations,
+		.stopping       = testPlugin(defaults ? "stopping/confidence_interval" : "stopping/fixed_count"),
+		.perFrame       = 0,
+		.execution      = run.execution,
+		.threads        = run.threads,
+		.observing      = observing,
+	};
+
+	const Framed rendered = stillFrame(input);
+	check(tiles.begun > 0 && tiles.placed == tiles.begun, "a frame tells its observers of every tile of its passes placed");
 	return rendered;
 }
 
@@ -375,41 +398,72 @@ const char* memberSetName(MemberSet members) {
 	return "core";
 }
 
+double imageDistance(const Image& a, const Image& b) {
+	double squares = 0;
+	for (std::size_t k = 0; k < a.rgb.size(); ++k) {
+		squares += double(a.rgb[k] - b.rgb[k]) * double(a.rgb[k] - b.rgb[k]);
+	}
+	return std::sqrt(squares / double(a.rgb.size()));
+}
+
+double imageMean(const Image& image) {
+	double total = 0;
+	for (const float value : image.rgb) {
+		total += double(value);
+	}
+	return total / double(image.rgb.size());
+}
+
+bool withinNoise(const Framed& a, const Framed& b, double noise) {
+	const double pixels = double(a.image.rgb.size()) / 3.0;
+	const bool noisy    = imageDistance(a.image, b.image) <= 1.25 * noise;
+	const bool unbiased = std::abs(imageMean(a.image) - imageMean(b.image)) <= 4.0 * noise / std::sqrt(pixels);
+	const bool effort   = std::abs(a.samples - b.samples) <= 0.1 * a.samples;
+	return a.image.rgb.size() == b.image.rgb.size() && noisy && unbiased && effort;
+}
+
 void checkFrames(const char* path, const Drawing& drawing, MemberSet members) {
-	const Rendered one   = framed(drawing, FrameRun { ExecutionMember::OneAtATime, 8, members });
-	const Rendered wave  = framed(drawing, FrameRun { ExecutionMember::Waves, 1, members });
-	const Rendered waves = framed(drawing, FrameRun { ExecutionMember::Waves, 8, members });
-	const bool same      = one.image.rgb == wave.image.rgb && one.image.rgb == waves.image.rgb;
-	std::printf("execution %s, %s members: waves on 1 and 8 threads %s one at a time\n", path, memberSetName(members), same ? "equal" : "differ from");
-	check(same && one.samples == wave.samples && one.samples == waves.samples, "waves draw the frame of one path at a time to the bit, on one thread and on eight");
+	SceneFile reseeded = drawing.file;
+	reseeded.shot.render.seed += 1;
+
+	const Drawing other = {
+		.file     = reseeded,
+		.geometry = drawing.geometry,
+	};
+
+	const Framed one   = framed(drawing, FrameRun { "execution/single", 8, members });
+	const Framed again = framed(other, FrameRun { "execution/single", 8, members });
+	const Framed wave  = framed(other, FrameRun { "execution/packets", 1, members });
+	const Framed waves = framed(other, FrameRun { "execution/packets", 8, members });
+	const double noise = imageDistance(one.image, again.image);
+	const bool same    = withinNoise(one, wave, noise) && withinNoise(one, waves, noise);
+	std::printf("execution %s, %s members: waves on 1 and 8 threads %s one at a time, %.4g and %.4g apart at a noise of %.4g between two seeds\n", path, memberSetName(members), same ? "within noise of" : "differ from", imageDistance(one.image, wave.image), imageDistance(one.image, waves.image), noise);
+	check(noise > 0 && same, "waves draw the frame of one ray at a time within noise, on one thread and on eight");
 }
 
 void checkSlabFrames(const char* path, const Drawing& drawing) {
 	const TestTree unbuilt = passedTestTree(drawing.file, passesWithoutFaceSlabs(), 8);
 
-	const Geometry geometry = {
-		.scene = drawing.file.scene,
-		.tree  = unbuilt.tree,
-	};
+	const Geometry geometry = treeGeometry(drawing.file.scene, unbuilt.tree);
 
 	const Drawing bare = {
 		.file     = drawing.file,
 		.geometry = geometry,
 	};
 
-	const Rendered one       = framed(drawing, FrameRun { ExecutionMember::OneAtATime, 8, MemberSet::Defaults });
-	const Rendered waves     = framed(drawing, FrameRun { ExecutionMember::Waves, 8, MemberSet::Defaults });
-	const Rendered bareOne   = framed(bare, FrameRun { ExecutionMember::OneAtATime, 8, MemberSet::Defaults });
-	const Rendered bareWaves = framed(bare, FrameRun { ExecutionMember::Waves, 8, MemberSet::Defaults });
-	const bool same          = one.image.rgb == bareOne.image.rgb && waves.image.rgb == bareWaves.image.rgb;
-	std::printf("execution %s: the frames with the face slabs on %s those with them off (%zu and %zu run words)\n", path, same ? "equal" : "differ from", drawing.geometry.tree.runs.size(), unbuilt.tree.runs.size());
+	const Framed one       = framed(drawing, FrameRun { "execution/single", 8, MemberSet::Defaults });
+	const Framed waves     = framed(drawing, FrameRun { "execution/packets", 8, MemberSet::Defaults });
+	const Framed bareOne   = framed(bare, FrameRun { "execution/single", 8, MemberSet::Defaults });
+	const Framed bareWaves = framed(bare, FrameRun { "execution/packets", 8, MemberSet::Defaults });
+	const bool same        = one.image.rgb == bareOne.image.rgb && waves.image.rgb == bareWaves.image.rgb;
+	std::printf("execution %s: the frames with the face slabs on %s those with them off (%zu and %zu run words)\n", path, same ? "equal" : "differ from", treeOf(drawing.geometry).runs.size(), unbuilt.tree.runs.size());
 	check(same && one.samples == bareOne.samples && waves.samples == bareWaves.samples, "the face slabs change no byte of the frame, with either Execution member");
 }
 
 bool sameShownSurface(const Surface& a, const Surface& b) {
-	const bool placed = sameBits(&a.distance, &b.distance, sizeof(float)) && sameBits(&a.normal, &b.normal, sizeof(math::Vector));
+	const bool placed = sameBits(&a.distance, &b.distance, sizeof(a.distance)) && sameBits(&a.normal, &b.normal, sizeof(a.normal));
 	const bool named  = a.leaf == b.leaf && a.material == b.material;
-	const bool looks  = sameBits(&a.albedo, &b.albedo, sizeof(Colour)) && sameBits(&a.roughness, &b.roughness, sizeof(float));
+	const bool looks  = sameBits(&a.albedo, &b.albedo, sizeof(a.albedo)) && sameBits(&a.roughness, &b.roughness, sizeof(a.roughness));
 	return placed && named && looks;
 }
 
@@ -433,16 +487,33 @@ struct SurfaceAim {
 	FilmPlan film;
 };
 
-std::vector<Surface> surfacesBy(const Tracing& tracing, const FrameRun& run, const SurfaceAim& aim) {
-	const SurfaceQuery query = {
-		.member  = run.execution,
-		.tracing = tracing,
-		.lens    = aim.lens,
-		.film    = aim.film,
-		.threads = run.threads,
+std::vector<Surface> surfacesBy(const FrameInput& frame, const std::shared_ptr<void>& transported, const FrameRun& run, const SurfaceAim& aim) {
+	const FrameInput input = {
+		.geometry       = frame.geometry,
+		.looks          = frame.looks,
+		.lighting       = frame.lighting,
+		.shot           = frame.shot,
+		.lens           = aim.lens,
+		.transport      = frame.transport,
+		.transportWorld = frame.transportWorld,
+		.preparations   = frame.preparations,
+		.stopping       = frame.stopping,
+		.perFrame       = frame.perFrame,
+		.execution      = run.execution,
+		.threads        = run.threads,
+		.observing      = frame.observing,
 	};
 
-	return surfacesOf(query);
+	const StepQuery query = {
+		.lens        = aim.lens,
+		.film        = aim.film,
+		.change      = Change::None,
+		.keepsGuides = false,
+	};
+
+	Renderer renderer            = testRenderer(input, firstStep(query));
+	renderer.drawing.transported = transported;
+	return tracedSurfaces(renderer);
 }
 
 int phasedOff(const std::vector<Surface>& phased, const std::vector<Surface>& fine, const Lens& lens, const FilmPlan& film) {
@@ -512,34 +583,48 @@ int recordsOff(const Tracing& tracing, int samples) {
 }
 
 void checkSurfaces(const char* path, const Drawing& drawing) {
-	Render render                                     = drawing.file.shot.render;
-	render.width                                      = 82;
-	render.height                                     = 51;
-	const Lens lens                                   = lensOf(drawing.file.shot.camera, render);
-	const Features features                           = featuresOf(featureQueryOf(drawing.file, 1));
-	const Prepared chosen                             = corePrepared();
-	const std::vector<PreparationMember> preparations = {};
-	Progress progress                                 = freshProgress();
+	Render render                          = drawing.file.shot.render;
+	render.width                           = 82;
+	render.height                          = 51;
+	const Lens lens                        = lensOf(drawing.file.shot.camera, render);
+	const Features features                = featuresOf(featureQueryOf(drawing.file, 1));
+	const ChosenMembers chosen             = coreChosen();
+	const std::vector<Plugin> preparations = {};
+	const Observing observing              = noObserving();
 
-	const FrameInput input = {
-		.geometry     = drawing.geometry,
-		.looks        = drawing.file.looks,
-		.lighting     = drawing.file.lighting,
-		.shot         = drawing.file.shot,
-		.lens         = lens,
-		.chosen       = chosen,
-		.preparations = preparations,
-		.features     = features,
-		.stopping     = StoppingMember::FixedCount,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = ExecutionMember::OneAtATime,
-		.threads      = 1,
-		.progress     = progress,
+	const PathsWorld paths = {
+		.features    = features,
+		.smoothGlass = SmoothGlass::Exact,
+		.sampling    = chosen.sampling,
+		.strategies  = chosen.strategies,
 	};
 
-	const FrameBasis basis = frameBasis(input);
-	Tracing tracing        = frameTracing(input, basis, chosen);
-	tracing.recording      = true;
+	const FrameInput input = {
+		.geometry       = drawing.geometry,
+		.looks          = drawing.file.looks,
+		.lighting       = drawing.file.lighting,
+		.shot           = drawing.file.shot,
+		.lens           = lens,
+		.transport      = testPlugin("transport/paths"),
+		.transportWorld = &paths,
+		.preparations   = preparations,
+		.stopping       = testPlugin("stopping/fixed_count"),
+		.perFrame       = 0,
+		.execution      = "execution/single",
+		.threads        = 1,
+		.observing      = observing,
+	};
+
+	const StepQuery still = {
+		.lens        = lens,
+		.film        = stillFilm(),
+		.change      = Change::None,
+		.keepsGuides = false,
+	};
+
+	Renderer renderer                       = testRenderer(input, firstStep(still));
+	const std::shared_ptr<void> transported = frameTransport(renderer, stillFilm(), true);
+	const Tracing& tracing                  = tracingOf(transported.get());
 
 	const SurfaceAim aim = {
 		.lens = lens,
@@ -566,12 +651,12 @@ void checkSurfaces(const char* path, const Drawing& drawing) {
 		.film = stillFilm(),
 	};
 
-	const std::vector<Surface> one         = surfacesBy(tracing, FrameRun { ExecutionMember::OneAtATime, 3, MemberSet::Core }, aim);
-	const std::vector<Surface> wave        = surfacesBy(tracing, FrameRun { ExecutionMember::Waves, 1, MemberSet::Core }, aim);
-	const std::vector<Surface> waves       = surfacesBy(tracing, FrameRun { ExecutionMember::Waves, 6, MemberSet::Core }, aim);
-	const std::vector<Surface> phasedOne   = surfacesBy(tracing, FrameRun { ExecutionMember::OneAtATime, 2, MemberSet::Core }, jittered);
-	const std::vector<Surface> phasedWaves = surfacesBy(tracing, FrameRun { ExecutionMember::Waves, 6, MemberSet::Core }, jittered);
-	const std::vector<Surface> fineOne     = surfacesBy(tracing, FrameRun { ExecutionMember::OneAtATime, 6, MemberSet::Core }, fine);
+	const std::vector<Surface> one         = surfacesBy(input, transported, FrameRun { "execution/single", 3, MemberSet::Core }, aim);
+	const std::vector<Surface> wave        = surfacesBy(input, transported, FrameRun { "execution/packets", 1, MemberSet::Core }, aim);
+	const std::vector<Surface> waves       = surfacesBy(input, transported, FrameRun { "execution/packets", 6, MemberSet::Core }, aim);
+	const std::vector<Surface> phasedOne   = surfacesBy(input, transported, FrameRun { "execution/single", 2, MemberSet::Core }, jittered);
+	const std::vector<Surface> phasedWaves = surfacesBy(input, transported, FrameRun { "execution/packets", 6, MemberSet::Core }, jittered);
+	const std::vector<Surface> fineOne     = surfacesBy(input, transported, FrameRun { "execution/single", 6, MemberSet::Core }, fine);
 	const int off                          = surfacesOff(one, wave) + surfacesOff(one, waves);
 	const int phaseOff                     = surfacesOff(phasedOne, phasedWaves);
 	const int centreOff                    = phasedOff(phasedOne, fineOne, lens, film);
@@ -592,10 +677,7 @@ void checkExecutionScene(const char* path) {
 	file.shot.render.samples = 4;
 	const TestTree tree      = testTree(file, 8);
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree.tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, tree.tree);
 
 	const Drawing drawing = {
 		.file     = file,

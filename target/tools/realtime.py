@@ -83,10 +83,13 @@ def sideways_track(camera, share):
         cameras.append((eye + offset, target + offset))
     return cameras
 
+def stops(cameras, part):
+    return '\n'.join('\t[%d, %.9g, %.9g, %.9g],' % (frame, *camera[part]) for frame, camera in enumerate(cameras))
+
 def write_track(path, cameras):
     with open(path, 'w') as f:
-        for eye, target in cameras:
-            f.write('%.9g %.9g %.9g %.9g %.9g %.9g\n' % (*eye, *target))
+        f.write('import "%%s";\n\nclip {\n\tduration = %d;\n\trate     = 1;\n}\n\nlet track_eyes = [\n%s\n];\n\nlet track_targets = [\n%s\n];\n\n' % (FRAMES, stops(cameras, 0), stops(cameras, 1)))
+        f.write('camera {\n\teye    = linear(track_eyes, time);\n\ttarget = linear(track_targets, time);\n}\n')
 
 def memory_left():
     with open('/proc/meminfo') as f:
@@ -110,7 +113,7 @@ def common_flags(options):
 
 def rendered_reference(options, scene_path, path, extra):
     if not os.path.exists(path):
-        run(options, [options.binary, scene_path, *common_flags(options), '--use', 'stopping=fixed', *extra, '--out', path[:-4] + '.ppm', '--pfm', path])
+        run(options, [options.binary, scene_path, *common_flags(options), '--use', 'stopping=fixed_count', *extra, '--out', path[:-4] + '.ppm', '--pfm', path])
     image = read_linear(path)
     return image.astype(numpy.float32), compare.graded(image).astype(numpy.float32)
 
@@ -158,8 +161,10 @@ def measured_track(options, track, configuration, references):
     name, reconstruction, factor = configuration
     options.frames = os.path.join(options.directory, 'frames')
     shutil.rmtree(options.frames, ignore_errors=True)
-    track_path = os.path.join(options.directory, track + '.txt')
-    log = run(options, [options.binary, options.scene, *common_flags(options), '--frames', str(FRAMES), '--track', track_path, '--out', options.frames, '--reconstruction', reconstruction, '--factor', str(factor)])
+    clip_path = os.path.join(options.directory, track + '.sdf')
+    with open(clip_path, 'w') as f:
+        f.write(open(os.path.join(options.directory, track + '.txt')).read() % options.scene)
+    log = run(options, [options.binary, clip_path, *common_flags(options), '--samples', '1', '--use', 'stopping=fixed_count', '--out', options.frames, '--reconstruction', reconstruction, '--factor', str(factor)])
     rows = frame_rows(options, (name, track), references, frame_log(log))
     shutil.rmtree(options.frames)
     return rows

@@ -1,8 +1,8 @@
 # AGENTS.md
 
 Kodanuki is a spectral path-tracer for a custom SDF based file format.
-A minimal core defines how the renderer works. Additional extras plug
-into extension points to provide features or optimizations.
+A minimal core defines how the renderer works. Plugins plug into
+extension points to provide features or optimizations.
 
 Read `target/docs/index.md` to find out more about the renderer.
 

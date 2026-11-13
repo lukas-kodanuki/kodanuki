@@ -1,8 +1,9 @@
 #pragma once
 
+#include "math/colour.h"
 #include "math/vector.h"
 #include "sdf/program.h"
-#include "spectral/colour.h"
+#include "shared/image.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -195,20 +196,6 @@ enum class Rule : std::uint8_t {
 	 * looks past it for the lights.
 	 */
 	Shadowless = 4,
-};
-
-/**
- * How graded colours are pressed into the displayable range.
- */
-enum class Curve : std::uint8_t {
-	/**
-	 * A filmic shoulder that rolls highlights off.
-	 */
-	Filmic,
-	/**
-	 * Straight, clamped at one.
-	 */
-	Clamped,
 };
 
 /**
@@ -617,20 +604,6 @@ struct Render {
 };
 
 /**
- * How light is turned into displayed colour.
- */
-struct Grade {
-	/**
-	 * What the light is multiplied by first.
-	 */
-	float exposure;
-	/**
-	 * The curve.
-	 */
-	Curve curve;
-};
-
-/**
  * One colour a painted sky shows, and the height it shows it at.
  */
 struct SkyStop {
@@ -840,7 +813,30 @@ struct Lighting {
 };
 
 /**
- * How a scene is taken: the camera, the render settings and the grade.
+ * What makes a scene file a video: its length, its frames a second and
+ * the times one shot ends and the next begins.
+ */
+struct Clip {
+	/**
+	 * How long the clip runs, in seconds; 0 for a still, which has no
+	 * clip.
+	 */
+	double duration;
+	/**
+	 * How many frames a second it has. Frame k is the scene at time k /
+	 * rate.
+	 */
+	double rate;
+	/**
+	 * The times of its cuts, rising and inside the clip: the frame that
+	 * reaches one starts over.
+	 */
+	std::vector<double> cuts;
+};
+
+/**
+ * How a scene is taken: the camera, the render settings, the grade and
+ * the clip.
  */
 struct Shot {
 	/**
@@ -855,6 +851,10 @@ struct Shot {
 	 * The grade.
 	 */
 	Grade grade;
+	/**
+	 * The clip; a duration of 0 where the file is a still.
+	 */
+	Clip clip;
 };
 
 /**
@@ -875,9 +875,14 @@ struct SceneFile {
 	 */
 	Lighting lighting;
 	/**
-	 * The camera, the render settings and the grade.
+	 * The camera, the render settings, the grade and the clip.
 	 */
 	Shot shot;
+	/**
+	 * Whether the file read `time`: one that did not is the same at
+	 * every time.
+	 */
+	bool timed;
 };
 
 /**
@@ -890,6 +895,14 @@ constexpr std::size_t mostGroups = 64;
  * top is cut into objects of their own.
  */
 constexpr std::size_t fewestUnionSteps = 512;
+
+/**
+ * Return how many frames a clip has: its duration times its rate,
+ * rounded, at least one.
+ *
+ * @param clip The clip.
+ */
+int clipFrames(const Clip& clip);
 
 /**
  * Return a leaf's distance at a point: its program run in its own
@@ -988,6 +1001,14 @@ Program leafProgram(const Scene& scene, std::uint32_t leaf);
  * @param scene The scene.
  */
 std::vector<Program> objectPrograms(const Scene& scene);
+
+/**
+ * Return how many steps the longest of a scene's programs has: the
+ * registers one evaluation of any of them needs.
+ *
+ * @param scene The scene.
+ */
+std::size_t longestProgram(const Scene& scene);
 
 /**
  * Return a world-space program's value at a point.

@@ -1,15 +1,16 @@
-#include "extras/execution_correct_waves/answer.h"
-#include "extras/execution_correct_waves/packet.h"
-#include "frame/run.h"
-#include "material/material.h"
+#include "plugins/execution/packets/answer.h"
+#include "plugins/execution/packets/packet.h"
+#include "plugins/geometry/tree/hit.h"
+#include "plugins/geometry/tree/leaf.h"
+#include "plugins/geometry/tree/pass.h"
+#include "plugins/geometry/tree/span.h"
+#include "plugins/geometry/tree/walk.h"
+#include "plugins/geometry/tree/world.h"
+#include "plugins/transport/paths/camera.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/material/material.h"
+#include "plugins/transport/paths/paths.h"
 #include "sdf/scene.h"
-#include "transport/camera.h"
-#include "transport/feature.h"
-#include "tree/pass.h"
-#include "walk/hit.h"
-#include "walk/leaf.h"
-#include "walk/span.h"
-#include "walk/walk.h"
 
 #include <algorithm>
 #include <atomic>
@@ -98,7 +99,7 @@ std::vector<RaySet> raySets(const Geometry& geometry, const Lens& lens, const Lo
 	RaySet inside = { "inside", {}, RayKind::Inside };
 	std::mt19937 random(7);
 	std::uniform_real_distribution<double> unit(0, 1);
-	const Region& region = geometry.tree.region;
+	const Region& region = treeOf(geometry).region;
 	for (int ty = 0; ty + 1 < lens.height; ty += 2) {
 		for (int tx = 0; tx + 3 < lens.width; tx += 4) {
 			for (int k = 0; k < 8; ++k) {
@@ -116,15 +117,15 @@ std::vector<RaySet> raySets(const Geometry& geometry, const Lens& lens, const Lo
 		if (material != noMaterial && material < looks.materials.size() && looks.materials[material].kind == MaterialKind::Glass) {
 			for (int k = 0; k < 4; ++k) {
 				const math::Vector into = math::normalized(ray.direction * 0.8 - hit.normal * (0.6 * unit(random)));
-				inside.rays.push_back(Ray { .origin = hit.point - hit.normal * lift, .direction = into, .far = std::numeric_limits<double>::infinity(), .inside = true, .within = material });
+				inside.rays.push_back(Ray { .origin = hit.point - hit.normal * lift, .direction = into, .far = std::numeric_limits<float>::infinity(), .inside = true, .within = material });
 			}
 		}
 		const math::Vector origin = hit.point + hit.normal * lift;
-		bounce.rays.push_back(Ray { .origin = origin, .direction = cosineAround(hit.normal, random), .far = std::numeric_limits<double>::infinity(), .inside = false, .within = 0 });
+		bounce.rays.push_back(Ray { .origin = origin, .direction = cosineAround(hit.normal, random), .far = std::numeric_limits<float>::infinity(), .inside = false, .within = 0 });
 		const math::Vector target = { region.lower[0] + region.size[0] * unit(random), region.lower[1] + region.size[1] * (0.6 + 0.4 * unit(random)), region.lower[2] + region.size[2] * unit(random) };
 		const math::Vector toward = target - origin;
 		const double reach        = math::length(toward);
-		shadow.rays.push_back(Ray { .origin = origin, .direction = toward * (1 / reach), .far = reach, .inside = false, .within = 0 });
+		shadow.rays.push_back(Ray { .origin = origin, .direction = toward * (1 / reach), .far = float(reach), .inside = false, .within = 0 });
 	}
 	return { camera, bounce, shadow, inside };
 }
@@ -168,10 +169,10 @@ struct Timed {
 };
 
 // User-space instructions of this thread, for A/B counts that the shared cores do not disturb.
-struct Counter {
+struct PerfCounter {
 	int fd = -1;
 
-	explicit Counter(std::uint64_t config) {
+	explicit PerfCounter(std::uint64_t config) {
 		perf_event_attr attr = {};
 		attr.type            = PERF_TYPE_HARDWARE;
 		attr.size            = sizeof(attr);
@@ -181,7 +182,7 @@ struct Counter {
 		fd                   = int(syscall(SYS_perf_event_open, &attr, 0, -1, -1, 0));
 	}
 
-	~Counter() {
+	~PerfCounter() {
 		if (fd >= 0) {
 			close(fd);
 		}
@@ -196,8 +197,8 @@ struct Counter {
 	}
 };
 
-thread_local Counter counter(PERF_COUNT_HW_INSTRUCTIONS);
-thread_local Counter cycleCounter(PERF_COUNT_HW_CPU_CYCLES);
+thread_local PerfCounter counter(PERF_COUNT_HW_INSTRUCTIONS);
+thread_local PerfCounter cycleCounter(PERF_COUNT_HW_CPU_CYCLES);
 
 Timed timedWalk(const Geometry& geometry, const RaySet& set, int rounds) {
 	std::uint64_t hash            = 0xCBF29CE484222325ull;
@@ -260,7 +261,7 @@ struct CellBox {
 };
 
 CellBox cellOf(const Geometry& geometry, const math::Vector& p) {
-	const Tree& tree = geometry.tree;
+	const Tree& tree = treeOf(geometry);
 	CellBox box      = { { tree.region.lower[0], tree.region.lower[1], tree.region.lower[2] }, tree.region.size[0], 0, false };
 	CellEntry entry  = tree.root;
 	auto half        = [&](CellBox& b) {
@@ -291,7 +292,7 @@ CellBox cellOf(const Geometry& geometry, const math::Vector& p) {
 
 math::Vector cutGradient(const Geometry& geometry, std::uint32_t surface, const math::Vector& p) {
 	thread_local std::vector<math::Dual> registers;
-	const Tree& tree                = geometry.tree;
+	const Tree& tree                = treeOf(geometry);
 	const ProgramList& list         = tree.lists[tree.surfaces[surface].programs];
 	const KeptSteps steps           = referencedSteps(geometry.scene, tree, tree.references[list.first]);
 	const math::Dual zero           = math::constantAs<math::Dual>(0);
@@ -361,7 +362,7 @@ FaceNormal faceNormal(const LeafRun& run, std::uint32_t face, const double* u) {
 }
 
 bool facedStop(const Geometry& geometry, const Met& met) {
-	return met.kind == MetKind::Surface && passLandedFace(geometry.tree.runs.data() + geometry.tree.surfaces[met.payload].run, met.face, nullptr).exact;
+	return met.kind == MetKind::Surface && passLandedFace(treeOf(geometry).runs.data() + treeOf(geometry).surfaces[met.payload].run, met.face, nullptr).exact;
 }
 
 void facedStudy(const Geometry& geometry, const RaySet& set) {
@@ -381,14 +382,14 @@ void facedStudy(const Geometry& geometry, const RaySet& set) {
 		}
 		surfaces += 1;
 		if (!facedStop(geometry, met)) {
-			const LeafRun run = surfaceLeafRun(geometry.tree, met.payload);
+			const LeafRun run = surfaceLeafRun(treeOf(geometry), met.payload);
 			const int reason  = met.face < 0 ? 0 : run.header.passWords == 0 ? 1 + int(faceKind(run.header, std::uint32_t(met.face)))
 																			 : 5 + int(faceKind(run.header, std::uint32_t(met.face)));
 			unfaced[reason] += 1;
 			if (std::getenv("KODANUKI_SHOW") != nullptr && reason >= 5 && unfaced[reason] <= 4) {
 				const std::uint32_t* w = run.words + 1 + tableWordCount(run.header.count);
 				const Hit sdf          = intersect(geometry, ray);
-				std::printf("    unfaced %s at %.4f %.4f %.4f: faces %u, face %d, words %08x %08x (paired %d), sdf leaf %u, programs %u\n", set.name.c_str(), sdf.point.x, sdf.point.y, sdf.point.z, run.header.count, met.face, w[0], run.header.passWords > 1 ? w[1] : 0u, int(run.header.passWords), sdf.leaf, geometry.tree.lists[geometry.tree.surfaces[met.payload].programs].count);
+				std::printf("    unfaced %s at %.4f %.4f %.4f: faces %u, face %d, words %08x %08x (paired %d), sdf leaf %u, programs %u\n", set.name.c_str(), sdf.point.x, sdf.point.y, sdf.point.z, run.header.count, met.face, w[0], run.header.passWords > 1 ? w[1] : 0u, int(run.header.passWords), sdf.leaf, treeOf(geometry).lists[treeOf(geometry).surfaces[met.payload].programs].count);
 			}
 			continue;
 		}
@@ -397,8 +398,8 @@ void facedStudy(const Geometry& geometry, const RaySet& set) {
 		const Hit fast      = hitOf(walker, met);
 		const Hit sdf       = surfaceHit(hitQueryOf(walker, met), met.payload);
 		if (fast.leaf != sdf.leaf && leafOff < 6) {
-			const LeafRun run = surfaceLeafRun(geometry.tree, met.payload);
-			std::printf("    leaf %u vs sdf %u (other %u share %.3f) at %.4f %.4f %.4f; programs %u, faces %u, face %d kind %d, side %.2e, inside %d\n", fast.leaf, sdf.leaf, sdf.other, sdf.share, fast.point.x, fast.point.y, fast.point.z, geometry.tree.lists[geometry.tree.surfaces[met.payload].programs].count, run.header.count, met.face, int(faceKind(run.header, std::uint32_t(met.face))), met.side, int(ray.inside));
+			const LeafRun run = surfaceLeafRun(treeOf(geometry), met.payload);
+			std::printf("    leaf %u vs sdf %u (other %u share %.3f) at %.4f %.4f %.4f; programs %u, faces %u, face %d kind %d, side %.2e, inside %d\n", fast.leaf, sdf.leaf, sdf.other, sdf.share, fast.point.x, fast.point.y, fast.point.z, treeOf(geometry).lists[treeOf(geometry).surfaces[met.payload].programs].count, run.header.count, met.face, int(faceKind(run.header, std::uint32_t(met.face))), met.side, int(ray.inside));
 		}
 		leafOff += fast.leaf != sdf.leaf ? 1 : 0;
 		angles.push_back(std::acos(std::clamp(math::dot(fast.normal, sdf.normal), -1.0, 1.0)) * 180 / M_PI);
@@ -428,7 +429,7 @@ void normalStudy(const Geometry& geometry, const RaySet& set) {
 			u[axis] = std::clamp((math::component(hit.point, axis) - box.lower[axis]) / box.size, 0.0, 1.0);
 			wall    = std::min({ wall, u[axis], 1 - u[axis] });
 		}
-		const LeafRun run  = surfaceLeafRun(geometry.tree, hit.cell);
+		const LeafRun run  = surfaceLeafRun(treeOf(geometry), hit.cell);
 		std::uint32_t best = 0;
 		FaceNormal chosen  = faceNormal(run, 0, u);
 		for (std::uint32_t f = 1; f < run.header.count; ++f) {
@@ -440,7 +441,7 @@ void normalStudy(const Geometry& geometry, const RaySet& set) {
 		}
 		const double error = degreesBetween(chosen.gradient, hit.normal);
 		byKind[int(faceKind(run.header, best))].push_back(error);
-		landed.push_back(chosen.distance * box.size / std::max(hit.loosened, 1e-12));
+		landed.push_back(chosen.distance * box.size / std::max(double(hit.loosened), 1e-12));
 		if (faceKind(run.header, best) != FaceKind::Plane) {
 			nearWall[wall < 0.1 ? 0 : 1].push_back(error);
 		}
@@ -546,14 +547,11 @@ int main(int argc, char** argv) {
 		}
 	}
 	const Clock::time_point built0 = Clock::now();
-	const Features features        = featuresOf(featureQueryOf(file, choices.threads));
-	const BuiltGeometry built      = builtGeometry(file, choices, features);
+	const PathsWorld paths         = pathsWorldOf(file, choices);
+	const BuiltGeometry built      = builtGeometry(file, choices, paths);
 	const double buildSeconds      = secondsSince(built0);
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = built.tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, built.tree);
 
 	const Lens lens       = lensOf(file.shot.camera, file.shot.render);
 	std::size_t described = 0;

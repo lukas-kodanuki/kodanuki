@@ -448,6 +448,7 @@ std::optional<Value> builtinName(const Evaluator& evaluator, const std::string& 
 }
 
 Value lookup(Evaluator& evaluator, const std::string& name) {
+	evaluator.timed = evaluator.timed || name == "time";
 	if (const Value* found = findName(evaluator, name)) {
 		return *found;
 	}
@@ -749,6 +750,140 @@ std::size_t elementwiseCount(Opcode opcode) {
 	return opcode == Opcode::ArcTangent || opcode == Opcode::Power || opcode == Opcode::Minimum || opcode == Opcode::Maximum ? 2 : 1;
 }
 
+double knownOf(const Value& value, const Location& location) {
+	expectNumber(value, location);
+	if (value.slot >= 0) {
+		fail(location, "expected a number known when the scene loads");
+	}
+	return value.number;
+}
+
+struct TimedStop {
+	double time;
+	std::vector<double> values;
+};
+
+bool shapedStop(const Value& stop, const std::vector<TimedStop>& read) {
+	const bool listed = stop.kind == ValueKind::List && stop.items.size() >= 2;
+	return listed && (read.empty() || stop.items.size() == read[0].values.size() + 1);
+}
+
+TimedStop timedStop(const Value& stop, const Location& location) {
+	std::vector<double> numbers;
+	for (const Value& item : stop.items) {
+		numbers.push_back(knownOf(item, location));
+	}
+	return TimedStop {
+		.time   = numbers[0],
+		.values = std::vector<double>(numbers.begin() + 1, numbers.end()),
+	};
+}
+
+std::vector<TimedStop> timedStops(const Value& stops, const Location& location) {
+	if (stops.kind != ValueKind::List || stops.items.empty()) {
+		fail(location, "the stops are a list of [time, values...]");
+		return {};
+	}
+	std::vector<TimedStop> read;
+	for (const Value& stop : stops.items) {
+		if (!shapedStop(stop, read)) {
+			fail(location, "a stop is [time, values...], as long as the first");
+			return {};
+		}
+		read.push_back(timedStop(stop, location));
+		if (read.size() > 1 && read.back().time < read[read.size() - 2].time) {
+			fail(location, "the stops' times rise");
+			return {};
+		}
+	}
+	return read;
+}
+
+std::size_t stopAtOrBefore(const std::vector<TimedStop>& stops, double t) {
+	std::size_t at = 0;
+	while (at + 1 < stops.size() && stops[at + 1].time <= t) {
+		at += 1;
+	}
+	return at;
+}
+
+std::vector<double> blendedValues(const std::vector<double>& a, const std::vector<double>& b, double share) {
+	std::vector<double> blended;
+	for (std::size_t i = 0; i < a.size(); ++i) {
+		blended.push_back(a[i] + (b[i] - a[i]) * share);
+	}
+	return blended;
+}
+
+bool inCurve(const std::vector<TimedStop>& stops, std::size_t from, std::size_t to) {
+	return to < stops.size() && stops[from].time != stops[to].time;
+}
+
+std::vector<double> slopeBetween(const TimedStop& a, const TimedStop& b) {
+	std::vector<double> slope;
+	for (std::size_t i = 0; i < a.values.size(); ++i) {
+		slope.push_back((b.values[i] - a.values[i]) / (b.time - a.time));
+	}
+	return slope;
+}
+
+std::vector<double> slopeAt(const std::vector<TimedStop>& stops, std::size_t at) {
+	const bool before      = at > 0 && inCurve(stops, at, at - 1);
+	const bool after       = inCurve(stops, at, at + 1);
+	const TimedStop& first = before ? stops[at - 1] : stops[at];
+	const TimedStop& last  = after ? stops[at + 1] : stops[at];
+	if (!before && !after) {
+		return std::vector<double>(stops[at].values.size(), 0.0);
+	}
+	return slopeBetween(first, last);
+}
+
+std::vector<double> hermiteValues(const std::vector<TimedStop>& stops, std::size_t at, double share) {
+	const double s                 = share;
+	const double span              = stops[at + 1].time - stops[at].time;
+	const double weights[4]        = { 2 * s * s * s - 3 * s * s + 1, (s * s * s - 2 * s * s + s) * span, -2 * s * s * s + 3 * s * s, (s * s * s - s * s) * span };
+	const std::vector<double> from = slopeAt(stops, at);
+	const std::vector<double> to   = slopeAt(stops, at + 1);
+	std::vector<double> values;
+	for (std::size_t i = 0; i < from.size(); ++i) {
+		values.push_back(weights[0] * stops[at].values[i] + weights[1] * from[i] + weights[2] * stops[at + 1].values[i] + weights[3] * to[i]);
+	}
+	return values;
+}
+
+std::vector<double> stopsAt(const std::vector<TimedStop>& stops, double t, bool smooth) {
+	const std::size_t at = stopAtOrBefore(stops, t);
+	if (t <= stops[at].time || at + 1 == stops.size()) {
+		return stops[at].values;
+	}
+	const double share = (t - stops[at].time) / (stops[at + 1].time - stops[at].time);
+	return smooth ? hermiteValues(stops, at, share) : blendedValues(stops[at].values, stops[at + 1].values, share);
+}
+
+Value numbersValue(const std::vector<double>& numbers) {
+	if (numbers.size() == 1) {
+		return numberValue(numbers[0]);
+	}
+	std::vector<Value> items;
+	for (const double number : numbers) {
+		items.push_back(numberValue(number));
+	}
+	return listValue(items);
+}
+
+Value stopsValue(const Call& call, bool smooth) {
+	expectCount(call, 2);
+	if (failed()) {
+		return numberValue(0);
+	}
+	const std::vector<TimedStop> stops = timedStops(call.arguments.positional[0], call.expression.location);
+	const double t                     = knownOf(call.arguments.positional[1], call.expression.location);
+	if (failed()) {
+		return numberValue(0);
+	}
+	return numbersValue(stopsAt(stops, t, smooth));
+}
+
 std::optional<Value> evaluateMath(Evaluator& evaluator, const Call& call) {
 	const std::string& name = call.expression.text;
 	if (std::optional<Opcode> opcode = elementwiseOpcode(name)) {
@@ -781,6 +916,9 @@ std::optional<Value> evaluateMath(Evaluator& evaluator, const Call& call) {
 	if (name == "count") {
 		return countValue(operationOf(call, Opcode::Add, 1));
 	}
+	if (name == "linear" || name == "smooth") {
+		return stopsValue(call, name == "smooth");
+	}
 	return std::nullopt;
 }
 
@@ -801,11 +939,7 @@ std::vector<float> floats(const Value& value, std::size_t count, const Location&
 }
 
 float floatOf(const Value& value, const Location& location) {
-	expectNumber(value, location);
-	if (value.slot >= 0) {
-		fail(location, "expected a number known when the scene loads");
-	}
-	return float(value.number);
+	return float(knownOf(value, location));
 }
 
 std::vector<float> rampStops(const Pattern& pattern) {
@@ -1801,6 +1935,39 @@ void readCamera(Shot& shot, const Fields& fields) {
 	readFloat(fields, "focus", shot.camera.focus);
 }
 
+std::vector<double> clipCuts(const Fields& fields, double duration) {
+	const Value& cuts = fields.values.at("cuts");
+	if (cuts.kind != ValueKind::List) {
+		fail(fields.setting.location, "cuts is a list of times");
+		return {};
+	}
+	std::vector<double> times;
+	for (const Value& cut : cuts.items) {
+		times.push_back(knownOf(cut, fields.setting.location));
+		const bool rising = times.size() < 2 || times.back() > times[times.size() - 2];
+		if (!rising || !(times.back() > 0 && times.back() < duration)) {
+			fail(fields.setting.location, "a clip's cuts rise and lie inside it");
+			return {};
+		}
+	}
+	return times;
+}
+
+void readClip(Shot& shot, const Fields& fields) {
+	checkFields(fields, { "duration", "rate", "cuts" });
+	if (!hasField(fields, "duration")) {
+		fail(fields.setting.location, "a clip has a duration");
+		return;
+	}
+	shot.clip.duration = knownOf(fields.values.at("duration"), fields.setting.location);
+	shot.clip.rate     = hasField(fields, "rate") ? knownOf(fields.values.at("rate"), fields.setting.location) : shot.clip.rate;
+	if (!(shot.clip.duration > 0) || !(shot.clip.rate > 0)) {
+		fail(fields.setting.location, "a clip's duration and rate are above 0");
+		return;
+	}
+	shot.clip.cuts = hasField(fields, "cuts") ? clipCuts(fields, shot.clip.duration) : std::vector<double> {};
+}
+
 Curve curveOf(const Fields& fields) {
 	const std::string& curve = fields.values.at("curve").word;
 	if (curve != "filmic" && curve != "clamped") {
@@ -1991,6 +2158,7 @@ void readShotSetting(Shot& shot, const std::string& name, const Fields& fields) 
 		{ "render", readRender },
 		{ "camera", readCamera },
 		{ "grade", readGrade },
+		{ "clip", readClip },
 	};
 
 	readers.at(name)(shot, fields);
@@ -2009,7 +2177,7 @@ void readLightingSetting(Lighting& lighting, const std::string& name, const Fiel
 }
 
 bool shotSetting(const std::string& name) {
-	return name == "render" || name == "camera" || name == "grade";
+	return name == "render" || name == "camera" || name == "grade" || name == "clip";
 }
 
 void runSetting(Evaluator& evaluator, const Statement& setting) {
@@ -2450,6 +2618,14 @@ void runReturn(Evaluator& evaluator, const Statement& statement) {
 	evaluator.compiler->returned = true;
 }
 
+void runLet(Evaluator& evaluator, const Statement& statement) {
+	if (statement.text == "time") {
+		fail(statement.location, "time belongs to the clip and cannot be changed");
+		return;
+	}
+	bind(evaluator, statement.text, evaluateExpression(evaluator, statement.expressions[0]));
+}
+
 void runSettingStatement(Evaluator& evaluator, const Statement& statement) {
 	expectBuilding(evaluator, statement);
 	if (failed()) {
@@ -2468,7 +2644,7 @@ void runStatement(Evaluator& evaluator, const Statement& statement, const Contex
 	}
 	switch (statement.kind) {
 		case StatementKind::Import: return runFile(evaluator, importedPath(*statement.location.file, statement.text), statement.location);
-		case StatementKind::Let: return bind(evaluator, statement.text, evaluateExpression(evaluator, statement.expressions[0]));
+		case StatementKind::Let: return runLet(evaluator, statement);
 		case StatementKind::For: return runLoop(evaluator, statement, context);
 		case StatementKind::If: return runIf(evaluator, statement, context);
 		case StatementKind::Return: return runReturn(evaluator, statement);
@@ -2665,10 +2841,17 @@ SceneFile emptySceneFile() {
 		.stars  = defaultStars(),
 	};
 
+	const Clip still = {
+		.duration = 0,
+		.rate     = 24,
+		.cuts     = {},
+	};
+
 	const Shot shot = {
 		.camera = defaultCamera(),
 		.render = defaultRender(),
 		.grade  = defaultGrade(),
+		.clip   = still,
 	};
 
 	return SceneFile {
@@ -2676,6 +2859,7 @@ SceneFile emptySceneFile() {
 		.looks    = looks,
 		.lighting = lighting,
 		.shot     = shot,
+		.timed    = false,
 	};
 }
 
@@ -2705,7 +2889,13 @@ LoadedScene failedLoad(const std::string& error) {
 	};
 }
 
-LoadedScene loadScene(const std::string& path) {
+Scope timedScope(double time) {
+	Scope scope;
+	scope["time"] = numberValue(time);
+	return scope;
+}
+
+LoadedScene loadScene(const std::string& path, double time) {
 	takenFailure();
 	SceneFile file = emptySceneFile();
 	Scene& scene   = file.scene;
@@ -2719,11 +2909,12 @@ LoadedScene loadScene(const std::string& path) {
 		.trees           = {},
 		.imported        = {},
 		.definitions     = {},
-		.scopes          = { Scope {} },
+		.scopes          = { timedScope(time) },
 		.base            = 1,
 		.compiler        = nullptr,
 		.specialised     = {},
 		.defaultMaterial = -1,
+		.timed           = false,
 	};
 
 	const Location start = {
@@ -2742,6 +2933,7 @@ LoadedScene loadScene(const std::string& path) {
 	}
 	scene.objects        = unionParts(scene);
 	scene.objectPrograms = objectPrograms(scene);
+	file.timed           = evaluator.timed;
 
 	return LoadedScene {
 		.file  = std::move(file),

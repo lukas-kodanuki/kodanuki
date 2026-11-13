@@ -1,7 +1,7 @@
-#include "viewer/fly.h"
+#include "plugins/sink/window/fly.h"
 
 #include "check.h"
-#include "frame/shown.h"
+#include "core/shown.h"
 #include "math/vector.h"
 
 #include <cmath>

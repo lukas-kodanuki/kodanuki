@@ -12,8 +12,8 @@ make render SCENE=scenes/city.sdf CONFIG=target/configs/render_final.toml
 make viewer SCENE=scenes/city.sdf CONFIG=target/configs/viewer_fast.toml
 ```
 
-- `render_fast` iterates quickly with every extra; `render_final` draws
-  the final frame without the biased extras; `viewer_fast` flies through
+- `render_fast` iterates quickly with every plugin at its default;
+  `render_final` draws the final frame without the Biased plugins; `viewer_fast` flies through
   the scene, and R in the viewer loads the file again.
 - Frames land in `output/<scene>.ppm` (graded) and `.pfm` (linear).
 - The settings a config takes are in rule 51 of `reference_rules.md`.

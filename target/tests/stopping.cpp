@@ -1,9 +1,10 @@
-#include "frame/stopping.h"
+#include "core/stopping.h"
 #include "check.h"
-#include "frame/frame.h"
-#include "frame/run.h"
+#include "core/frame.h"
+#include "core/plugin.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/paths.h"
 #include "syntax/evaluator.h"
-#include "transport/feature.h"
 
 #include <array>
 #include <cmath>
@@ -60,7 +61,7 @@ const char* stoppingText = R"(
 struct StoppingArm {
 	const SceneFile& file;
 	const Tree& tree;
-	StoppingMember member;
+	std::string member;
 	int split;
 };
 
@@ -70,39 +71,43 @@ struct StoppingSpread {
 	double samples;
 };
 
-Rendered stoppedFrame(const StoppingArm& arm, int seed) {
+Framed stoppedFrame(const StoppingArm& arm, int seed) {
 	Shot shot         = arm.file.shot;
 	shot.render.seed  = seed;
 	shot.render.split = arm.split;
 
-	const Geometry geometry = {
-		.scene = arm.file.scene,
-		.tree  = arm.tree,
-	};
+	const Geometry geometry = treeGeometry(arm.file.scene, arm.tree);
 
-	const Prepared chosen                     = corePrepared();
-	const Features features                   = featuresOf(featureQueryOf(arm.file, 1));
-	const std::vector<PreparationMember> none = {};
-	const Lens lens                           = lensOf(shot.camera, shot.render);
-	Progress progress                         = freshProgress();
+	const ChosenMembers chosen     = coreChosen();
+	const Features features        = featuresOf(featureQueryOf(arm.file, 1));
+	const std::vector<Plugin> none = {};
+	const Lens lens                = lensOf(shot.camera, shot.render);
+	const Observing observing      = noObserving();
+
+	const PathsWorld paths = {
+		.features    = features,
+		.smoothGlass = SmoothGlass::Exact,
+		.sampling    = chosen.sampling,
+		.strategies  = chosen.strategies,
+	};
 
 	const FrameInput input = {
-		.geometry     = geometry,
-		.looks        = arm.file.looks,
-		.lighting     = arm.file.lighting,
-		.shot         = shot,
-		.lens         = lens,
-		.chosen       = chosen,
-		.preparations = none,
-		.features     = features,
-		.stopping     = arm.member,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = ExecutionMember::Waves,
-		.threads      = stoppingThreads,
-		.progress     = progress,
+		.geometry       = geometry,
+		.looks          = arm.file.looks,
+		.lighting       = arm.file.lighting,
+		.shot           = shot,
+		.lens           = lens,
+		.transport      = testPlugin("transport/paths"),
+		.transportWorld = &paths,
+		.preparations   = none,
+		.stopping       = testPlugin(arm.member),
+		.perFrame       = 0,
+		.execution      = "execution/packets",
+		.threads        = stoppingThreads,
+		.observing      = observing,
 	};
 
-	return renderFrame(input);
+	return stillFrame(input);
 }
 
 std::array<double, 3> frameMeans(const Image& image) {
@@ -124,7 +129,7 @@ StoppingSpread stoppingSpread(const StoppingArm& arm) {
 	};
 
 	for (int seed = 1; seed <= stoppingSeeds; ++seed) {
-		const Rendered rendered = stoppedFrame(arm, seed);
+		const Framed rendered = stoppedFrame(arm, seed);
 		means.push_back(frameMeans(rendered.image));
 		spread.samples += rendered.samples / stoppingSeeds;
 	}
@@ -158,21 +163,21 @@ void checkStoppedMeans() {
 	const StoppingArm fixed = {
 		.file   = file,
 		.tree   = tree.tree,
-		.member = StoppingMember::FixedCount,
+		.member = "stopping/fixed_count",
 		.split  = 1,
 	};
 
 	const StoppingArm shared = {
 		.file   = file,
 		.tree   = tree.tree,
-		.member = StoppingMember::FixedCount,
+		.member = "stopping/fixed_count",
 		.split  = 4,
 	};
 
 	const StoppingArm interval = {
 		.file   = file,
 		.tree   = tree.tree,
-		.member = StoppingMember::ConfidenceInterval,
+		.member = "stopping/confidence_interval",
 		.split  = 0,
 	};
 
@@ -195,7 +200,7 @@ void checkOwnTrialUnread() {
 	};
 
 	const Stopping stopping = {
-		.member    = StoppingMember::ConfidenceInterval,
+		.plugin    = &testPlugin("stopping/confidence_interval"),
 		.samples   = 1024,
 		.batch     = 8,
 		.tolerance = 2,
@@ -208,7 +213,6 @@ void checkOwnTrialUnread() {
 		.width   = 7,
 		.height  = 5,
 		.wanted  = std::vector<float>(35, 0.0f),
-		.totals  = std::vector<Colour>(35, Colour { 0, 0, 0 }),
 		.split   = 2,
 		.spreads = std::vector<SplitSpread>(35, SplitSpread { 0, 0 }),
 	};

@@ -1,8 +1,8 @@
-#include "frame/run.h"
+#include "plugins/geometry/tree/cut.h"
+#include "plugins/transport/paths/paths.h"
 #include "sdf/scene.h"
 #include "spots.h"
 #include "syntax/evaluator.h"
-#include "tree/cut.h"
 
 #include <algorithm>
 #include <cstdio>

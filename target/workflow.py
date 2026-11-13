@@ -1,5 +1,6 @@
 #!/usr/bin/env -S python3 -B
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,43 +18,32 @@ USAGE = 'usage: workflow.py test|render|viewer|export|clean scene.sdf config.tom
 NUMBERS = ('tolerance', 'samples', 'batch', 'split', 'surfaces', 'collisions', 'seed', 'threads')
 SETTINGS = ('width', 'height', 'faces', 'smooth_glass') + NUMBERS
 VIEWER = ('internal_width', 'internal_height')
-JOINED = {
-    'detail': (['by_distance'], {
-        'detail_correct_focus_on_view': 'focus_on_view',
-        'detail_correct_pilot': 'pilot',
-        'detail_correct_split_hidden_primitives': 'split_hidden_primitives',
-        'detail_correct_split_crowded_leaves': 'split_crowded_leaves',
-    }),
-    'passes': ([], {
-        'build_correct_split_beside_finer': 'split_beside_finer',
-        'build_correct_cut_long_programs': 'cut_long_programs',
-        'build_correct_face_slabs': 'face_slabs',
-        'build_correct_shared_coefficients': 'shared_coefficients',
-        'build_correct_shared_subtrees': 'shared_subtrees',
-    }),
-    'strategies': (['meet', 'aim'], {
-        'strategy_correct_join': 'join',
-        'strategy_correct_connect': 'connect',
-    }),
-    'aims': (['lamps'], {
-        'sampler_correct_sky_map': 'sky_map',
-        'sampler_correct_glowing_surfaces': 'glowing_surfaces',
-    }),
+KEYS = {
+    'geometry': ('tree', 'sphere_trace'),
+    'execution': ('single', 'packets'),
+    'backend': ('cpu',),
+    'stopping': ('fixed_count', 'confidence_interval'),
+    'detail': ('focus_on_view', 'pilot', 'split_hidden_primitives', 'split_crowded_leaves'),
+    'build': ('split_beside_finer', 'cut_long_programs', 'face_slabs', 'shared_coefficients', 'shared_subtrees'),
+    'strategy': ('join', 'connect'),
+    'sampler': ('sobol', 'highlight_guide', 'each_lamp_first', 'sky_map', 'glowing_surfaces', 'toward_mirrors'),
 }
-CHOSEN = {
-    'execution_correct_waves': ('execution', 'waves', 'one_at_a_time'),
-    'stopping_consistent_confidence_interval': ('stopping', 'confidence', 'fixed'),
-    'sampler_correct_sobol': ('sequence', 'sobol', 'independent'),
-    'sampler_correct_highlight_guide': ('direction', 'material+highlight_guide', 'material'),
-    'sampler_correct_each_lamp_first': ('selection', 'each_lamp_first', 'one_by_contribution'),
+LOOP_KEYS = {
+    'source': ('scene', 'flight'),
+    'sink': ('file', 'frames', 'window'),
+    'observer': ('progress', 'metrics'),
+    'reconstruction': ('mean', 'temporal', 'atrous', 'upsample', 'upscale'),
 }
-BUILT = ('build_correct_faced_hits', 'feature_biased_clouds', 'feature_biased_path_rules', 'feature_mixed_coats')
-ALWAYS = ('feature_correct_absorption', 'feature_correct_atmosphere', 'feature_correct_dispersion',
-    'feature_correct_scattering', 'feature_correct_sky_layers', 'reconstruction_biased_atrous',
-    'reconstruction_biased_temporal', 'reconstruction_biased_upsample', 'reconstruction_biased_upscale',
-    'sampler_correct_toward_mirrors')
-EXTRAS = sorted([name for _, members in JOINED.values() for name in members] + list(CHOSEN) + list(BUILT) + list(ALWAYS))
-DEFAULTS = {name: name != 'strategy_correct_connect' for name in EXTRAS}
+ONE = ('geometry', 'execution', 'backend', 'stopping')
+BUILT = ('build/faced_hits', 'feature/clouds', 'feature/path_rules', 'feature/coats')
+ALWAYS = ('feature/absorption', 'feature/atmosphere', 'feature/dispersion',
+    'feature/scattering', 'feature/sky_layers', 'transport/paths')
+SWITCHED = {'%s/%s' % (key, member): key for key, members in {**KEYS, **LOOP_KEYS}.items() for member in members}
+PLUGINS = sorted(list(SWITCHED) + list(BUILT) + list(ALWAYS))
+OFF = ('geometry/sphere_trace', 'execution/single', 'stopping/fixed_count', 'strategy/connect',
+    'source/flight', 'sink/frames', 'sink/window', 'observer/metrics',
+    'reconstruction/temporal', 'reconstruction/atrous', 'reconstruction/upsample', 'reconstruction/upscale')
+DEFAULTS = {name: name not in OFF for name in PLUGINS}
 
 
 def refused(message):
@@ -68,26 +58,29 @@ def checked(path, block, known):
     return block
 
 
-def extras_of(path, block):
-    extras = {**DEFAULTS, **checked(path, block, EXTRAS)}
-    for name, on in extras.items():
+def plugins_of(path, block):
+    plugins = {**DEFAULTS, **checked(path, block, PLUGINS)}
+    for name, on in plugins.items():
         if not isinstance(on, bool):
-            refused('%s: extras.%s takes true or false' % (path, name))
+            refused('%s: plugins."%s" takes true or false' % (path, name))
         if not on and name in ALWAYS:
-            refused('%s: extras.%s cannot be left out' % (path, name))
-    return extras
+            refused('%s: plugins."%s" cannot be left out' % (path, name))
+    for key in ONE:
+        if [plugins[name] for name, of in SWITCHED.items() if of == key].count(True) != 1:
+            refused('%s: exactly one %s plugin is on' % (path, key))
+    return plugins
 
 
 def config_of(path):
     if not path.is_file():
         refused('%s: no such config' % path)
     with open(path, 'rb') as file:
-        config = checked(path, tomllib.load(file), ('settings', 'viewer', 'extras'))
-    return {
+        config = checked(path, tomllib.load(file), ('settings', 'viewer', 'plugins'))
+    return final_checked(path, {
         'settings': checked(path, config.get('settings', {}), SETTINGS),
         'viewer': checked(path, config.get('viewer', {}), VIEWER),
-        'extras': extras_of(path, config.get('extras', {})),
-    }
+        'plugins': plugins_of(path, config.get('plugins', {})),
+    })
 
 
 def pair(flag, settings, keys):
@@ -97,14 +90,8 @@ def pair(flag, settings, keys):
     return [flag] + [str(settings[key]) for key in keys] if given else []
 
 
-def uses(extras):
-    found = {}
-    for key, (base, members) in JOINED.items():
-        chosen = base + [member for name, member in members.items() if extras[name]]
-        found[key] = '+'.join(chosen) or 'none'
-    for name, (key, on, off) in CHOSEN.items():
-        found[key] = on if extras[name] else off
-    return found
+def uses(plugins, keys):
+    return {key: '+'.join(member for member in members if plugins['%s/%s' % (key, member)]) or 'none' for key, members in keys.items()}
 
 
 def switches(settings):
@@ -113,13 +100,13 @@ def switches(settings):
     return faces + ([] if glass == 'exact' else ['--use', 'smooth_glass=' + glass])
 
 
-def flags(config):
+def flags(config, keys):
     settings = config['settings']
     found = pair('--size', settings, ('width', 'height'))
     for key in NUMBERS:
         found += ['--' + key, str(settings[key])] if key in settings else []
-    defaults = uses(DEFAULTS)
-    for key, value in uses(config['extras']).items():
+    defaults = uses(DEFAULTS, keys)
+    for key, value in uses(config['plugins'], keys).items():
         found += ['--use', '%s=%s' % (key, value)] if value != defaults[key] else []
     return found + switches(settings)
 
@@ -130,19 +117,38 @@ def run(command, **extra):
         raise SystemExit(code)
 
 
-def known_extras():
-    present = sorted(path.name for path in (ROOT / 'source' / 'extras').iterdir() if path.is_dir())
-    if present != EXTRAS:
-        unknown = sorted(set(present) ^ set(EXTRAS))
-        refused('workflow.py: the extras in source/extras and in EXTRAS differ: %s' % ', '.join(unknown))
+def folders():
+    return sorted('%s/%s' % (path.parent.name, path.name) for path in (ROOT / 'source' / 'plugins').glob('*/*') if path.is_dir())
+
+
+def known_plugins():
+    present = folders()
+    if present != PLUGINS:
+        unknown = sorted(set(present) ^ set(PLUGINS))
+        refused('workflow.py: the plugins in source/plugins and in PLUGINS differ: %s' % ', '.join(unknown))
+
+
+def effect(name):
+    source = ROOT / 'source' / 'plugins' / name / 'plugin.cpp'
+    found = re.search(r'\.effect\s*=\s*Effect::(\w+)', source.read_text()) if source.is_file() else None
+    return found.group(1) if found else None
+
+
+def final_checked(path, config):
+    if PACKED or path.name != 'render_final.toml':
+        return config
+    for name, on in config['plugins'].items():
+        if on and effect(name) == 'Biased':
+            refused('%s: plugins."%s" is biased, so a final frame leaves it out' % (path, name))
+    return config
 
 
 def built_off(config):
-    return [name for name in BUILT if not config['extras'][name]]
+    return [name for name in BUILT if not config['plugins'][name]]
 
 
 def build_name(config):
-    return 'build' + ''.join('-' + name.split('_', 2)[2] for name in built_off(config))
+    return 'build' + ''.join('-' + name.split('/')[1] for name in built_off(config))
 
 
 def binaries(config):
@@ -152,7 +158,7 @@ def binaries(config):
 def compiled(config, directory, options, targets):
     if PACKED:
         return
-    known_extras()
+    known_plugins()
     off = ' '.join(built_off(config))
     run(['cmake', '-S', TARGET, '-B', directory, '-G', 'Ninja', '-DOFF=' + off, *options], stdout=subprocess.DEVNULL)
     rules = (directory / 'build.ninja').read_text()
@@ -181,14 +187,14 @@ def render(scene, config):
     renderer = program(config, 'kodanuki')
     OUTPUT.mkdir(exist_ok=True)
     frame = OUTPUT / scene.stem
-    run([renderer, scene, *flags(config), '--out', frame.with_suffix('.ppm'), '--pfm', frame.with_suffix('.pfm')])
+    run([renderer, scene, *flags(config, {**KEYS, **LOOP_KEYS}), '--out', frame.with_suffix('.ppm'), '--pfm', frame.with_suffix('.pfm')])
 
 
 def viewer(scene, config):
     shown = program(config, 'kodanuki_view')
     internal = pair('--internal', config['viewer'], VIEWER)
     libraries = {'LD_LIBRARY_PATH': str(BINARIES)} if PACKED else {}
-    run([shown, scene, *flags(config), *internal], env={**os.environ, **libraries})
+    run([shown, scene, *flags(config, KEYS), *internal], env={**os.environ, **libraries})
 
 
 def clean(scene, config):

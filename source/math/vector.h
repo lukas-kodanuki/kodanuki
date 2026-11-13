@@ -32,6 +32,59 @@ struct Vector {
 };
 
 /**
+ * A point or a direction as it is kept between two steps, in single
+ * precision (rule 5): in a ray, a hit, a walk.
+ *
+ * It is made from a Vector wherever one is stored and turns into one
+ * wherever it is read, so every kernel computes in double. Its three
+ * floats lie as a GPU buffer holds them. Single precision is enough
+ * for scenes within about 1e5 units of the origin.
+ */
+struct FloatVector {
+	/**
+	 * The x component.
+	 */
+	float x;
+	/**
+	 * The y component.
+	 */
+	float y;
+	/**
+	 * The z component.
+	 */
+	float z;
+	/**
+	 * Leave the components unset, as a plain struct's are.
+	 */
+	FloatVector() = default;
+
+	/**
+	 * Round a vector to single precision.
+	 *
+	 * @param wide The vector.
+	 */
+	FloatVector(const Vector& wide) : x(float(wide.x)), y(float(wide.y)), z(float(wide.z)) {
+	}
+
+	/**
+	 * Round three components to single precision.
+	 *
+	 * @param x The x component.
+	 * @param y The y component.
+	 * @param z The z component.
+	 */
+	FloatVector(double x, double y, double z) : x(float(x)), y(float(y)), z(float(z)) {
+	}
+
+	/**
+	 * Return the vector in double precision.
+	 */
+	operator Vector() const {
+		return { x, y, z };
+	}
+};
+
+/**
  * Three unit vectors at right angles, a frame around a normal.
  */
 struct Basis {

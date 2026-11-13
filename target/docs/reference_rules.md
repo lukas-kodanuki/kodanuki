@@ -8,31 +8,48 @@ a dropped rule is deleted.
 
 ## Scope
 
-1. The renderer is CPU only, no GPU. It draws offline frames, and a
-   viewer (`kodanuki_view`, see 48) draws a sequence interactively in
-   a window.
-2. The core stays minimal; the extras may be large.
-3. No dependencies beyond the C++ standard library, except that the
-   viewer links SDL3; the build skips the viewer where SDL3 is missing.
-   The scripts under `target/` use the Python standard library only.
+1. The CPU is one backend (`backend/cpu`); a GPU backend may come as
+   a plugin of the Backend point. The renderer draws offline frames,
+   and a viewer (`kodanuki_view`, see 48) draws a sequence
+   interactively in a window.
+2. The core is tiny: types, steps, points, plugins, workers, the loop.
+   Plugins do all the work and may be large. The core renders nothing
+   on its own.
+3. No dependencies beyond the C++ standard library for the core and
+   the CPU plugins. `sink/window` links SDL3; a GPU backend links
+   Vulkan and needs a GLSL compiler at build time. The build skips a
+   plugin whose dependency is missing, and the program that needs it
+   (`kodanuki_view` without SDL3). The scripts under `target/` use the
+   Python standard library only.
 4. Colour is spectral (hero wavelengths), with dispersion, thin films
    and media.
-5. Transport and shading use double; the walk's packet maths uses
-   float. The tree build and transforms use double.
+5. Data between steps is float where the float study allowed it
+   (rule 55); a CPU kernel may use double inside, and transport and
+   shading compute in double. The walk's packet maths uses float. The
+   tree build and transforms stay double.
 
 ## Code
 
 6. C++26. Plain headers with `#pragma once` and sources; no modules.
 7. Structs and free functions only, no classes. Functional style.
+   The one exception: `math::FloatVector`, `FloatSpectrum` and
+   `FloatColour` (rule 55; all three in `math`) carry a
+   converting constructor and a conversion operator, so a value
+   converts where it is stored and read.
 8. Functions are short: extract what makes a function read as one
    step. Complexity counts, not length: a long flat `switch` is fine.
    Small is not an absolute; readability counts more (see 44, 45).
 10. No `inline`. Definitions live in `.cpp` files; link-time
     optimisation inlines. Headers hold structs and declarations.
-    The one exception: `source/extras/execution_correct_waves/packet.cpp`
+    Exceptions: `source/plugins/execution/packets/packet.cpp`
     marks its node step's helpers `[[gnu::always_inline]] inline` (GCC
     wants the `inline` beside the attribute), since GCC otherwise keeps
-    the child step out of line and returns its span through the stack.
+    the child step out of line and returns its span through the stack;
+    the conversions of `math::FloatVector`, `FloatSpectrum` and
+    `FloatColour` (rule 7) are defined in their headers; the
+    arithmetic of `math::Vector` (`source/math/vector.h`) is `inline`
+    in its header; and `chainHyper2` in `source/sdf/numbers.cpp` is
+    `[[gnu::always_inline]] inline`.
 11. Templates only where nothing plainer works.
 12. Conventional, PBRT-style names (sample, pdf, intersect).
     Comments: documentation in headers only, see 36 and 43.
@@ -77,21 +94,23 @@ a dropped rule is deleted.
     as one step.
 33. Optimisations are kept, but behind a clear seam so more can be
     added later; nothing is optimised in a way that blocks extension.
-35. `source/render.cpp` and `source/viewer.cpp` are the programs (the
-    viewer's parts live in `source/viewer/`, rule 48); the core lives in
-    `source/<stage>/`, a folder per stage (reference_architecture.md), and each
-    extra in `source/extras/<point>_<category>_<name>/`: its main
-    extension point (strategy, sampler, preparation, detail, build,
-    feature, stopping, execution, reconstruction), then correct, consistent, biased
-    (it changes the mean) or mixed (part correct, part biased, as the
-    coats: exact colour, tint and glow, laddered roughness; the category
-    need not be exact), then its name, as in
-    `feature_biased_clouds`. An extra depends on the core only;
-    the core includes an extra only in its extension point's dispatch.
-    Every header has exactly one source file of the same name. A file
-    of only structs is cut too small: functions are small, files are
-    not. Everything that is not the renderer's code or a scene lives in
-    `target/` (rule 51).
+35. `source/render.cpp` and `source/viewer.cpp` are the programs; they
+    parse the command line and call `render()`. The core lives in
+    `source/core/`, the foundation in `source/shared/`, `math/`,
+    `sdf/` and `syntax/` (rule 57), and each plugin in
+    `source/plugins/<point>/<name>/`, as `feature/clouds`
+    (reference_architecture.md). A plugin depends on the core, the
+    foundation, the plugin that owns its point and the plugins its
+    `needed` hook names. The core names no plugin: the build generates
+    the list (`everyPlugin()`); an owner names its members in one
+    dispatch file. Each plugin has a `plugin.h`/`plugin.cpp` whose one
+    function returns its `Plugin`, with its effect: `Exact` (the mean
+    is the reference's, or within the scene's stated tolerance),
+    `Consistent` (in the limit) or `Biased` (it changes the mean, in
+    all or in part). Every header has exactly one source file of the
+    same name. A file of only structs is cut too small: functions are
+    small, files are not. Everything that is not the renderer's code
+    or a scene lives in `target/` (rule 51).
 34. Programs are evaluated in several number types by one interpreter
     over the type (a template, as rule 11 allows), and more may be
     added. Today's types include point, dual (gradient), interval,
@@ -130,7 +149,7 @@ a dropped rule is deleted.
     stays inline. A braced initialiser is never a call argument: name
     it as a local first. Initialise with `T name = {...}`. A small
     primitive-like type whose fields are clear from the type alone
-    (`math::Vector {x, y, z}`, `AirPoint`, a colour) may be initialised
+    (`math::Vector {x, y, z}`, a colour) may be initialised
     by position, `{a, b, c}`, inline.
 40. Structs have no default member values, and every initialiser names
     every field (enforced by -Werror=missing-field-initializers), except
@@ -159,33 +178,40 @@ a dropped rule is deleted.
     "the old renderer", "ported from", "as before", "now" or "unlike".
     A comment says what the code is and does; where it came from belongs
     in the commit message and the notes.
-48. The viewer is a second program, `source/viewer.cpp` with its
-    parts in `source/viewer/`, built as `kodanuki_view` and run by
-    `make viewer`; it takes the renderer's flags (the shared readers in
-    `frame/run.h`). The renderer never includes it; the tests may check
-    its SDL-free parts. `--size` is the output size, the window's and
-    the shown frames'; its own flag `--internal w h` sets the internal
-    size, which frames are drawn at, one sample a pixel and no drawing
-    at a fraction of it; without it the two are the same. `--size` must be
-    k = 1, 2, 3 or 4 times `--internal` on both sides, else it prints
-    `--internal: --size must be 1, 2, 3 or 4 times it on both sides`
-    and exits 1. Each frame is drawn jittered at the internal size: its
-    film plan has the factor k and the phase of its index in the Bayer
-    order (`bayerFilm`), so drawn pixel (x, y) aims into output pixel
-    (x k + column, y k + row), and every output pixel gets its own
-    sample once in k² frames; a phase that changes is not a move. The
-    G-buffer is traced at the internal size through those output
-    pixels' centres; the temporal accumulation (Temporal) and then the
-    denoiser (Denoise) work at the internal size on those jittered
-    pixels, and the temporal upscaler (Upscale) turns the result into
-    the output size, moving or still (biased, but it keeps converging).
-    It draws with Meet and Aim
-    unless --use strategies says otherwise: Join's light pass reruns on
-    every move and splats onto pixels the temporal upscaler does not
-    read. It flies: W, A, S, D move along the view and its right, Space
-    and Ctrl along the up, Shift four times as fast, the mouse with its
-    right button held turns the view, the wheel scales the speed, R
-    loads the scene file again, Escape quits.
+48. The viewer is a second program, `source/viewer.cpp`, built as
+    `kodanuki_view` and run by `make viewer`. Like `render.cpp` it
+    reads the renderer's flags (`readOptions()`, core/options.h) and
+    calls `render()`; its parts are the plugins `sink/window` (the
+    window, its keys and the flight) and `source/flight` (the camera
+    flown in it, read from `sink/window`). The renderer never chooses
+    them; the tests may check their SDL-free parts. `--size` is the
+    output size, the window's and the shown frames'; its own flag
+    `--internal w h` sets the internal size, which frames are drawn at,
+    one sample a pixel and no drawing at a fraction of it; without it
+    the two are the same. `--size` must be k = 1, 2, 3 or 4 times
+    `--internal` on both sides, else it prints `--internal: --size must
+    be 1, 2, 3 or 4 times it on both sides` and exits 1. Each frame is
+    drawn jittered at the internal size: its film plan has the factor k
+    and the phase of its index in the Bayer order (`bayerFilm`), so
+    drawn pixel (x, y) aims into output pixel (x k + column, y k + row),
+    and every output pixel gets its own sample once in k² frames; a
+    phase that changes is not a move. The G-buffer is traced at the
+    internal size through those output pixels' centres;
+    `reconstruction/temporal` and then `reconstruction/atrous` work at
+    the internal size on those jittered pixels, and
+    `reconstruction/upscale` turns the result into the output size,
+    moving or still (biased, but it keeps converging). It draws with Meet
+    and Aim alone, no Strategy plugin, unless `--use strategy=` says
+    otherwise:
+    `strategy/join`'s light pass reruns on every move and splats onto
+    pixels the upscaler does not read. It flies: W, A, S, D move along
+    the view and its right, Space and Ctrl along the up, Shift four
+    times as fast, the mouse with its right button held turns the view,
+    the wheel scales the speed, R loads the scene file again, Escape
+    quits. A scene with a clip plays by the wall clock and loops (its
+    parts `source/scene`, then `source/flight`): P pauses the time, the
+    left and right arrow keys step one clip frame back and forward, and
+    the camera stays the clip's until a key moves it.
 49. No local variable that only shortens a name: write
     `coat.axis`, not `const math::Vector& axis = coat.axis;` followed
     by `axis`. A local names a computed value or a step. A local that
@@ -208,23 +234,53 @@ a dropped rule is deleted.
     (their flags; one left out keeps the scene's value), `faces` (`true`
     or `false`) and `smooth_glass` (`"exact"` or `"lobe"`). `[viewer]`
     takes what only the viewer reads: `internal_width` and
-    `internal_height` (`--internal`). `[extras]`
-    names every extra by its folder name, `true` or `false`, at the
-    default the source gives it. The workflow turns an extra into the
-    `--use` member it stands for, or builds it off where it has no member;
-    an extra with no switch at all refuses `false`. A config has no
-    comments and its `=` is not aligned, and it lists every extra.
-    `render_final.toml` draws final frames and leaves the biased and
-    mixed extras out; `render_fast.toml` draws quick frames (tolerance
-    4) with every extra at its default; `viewer_fast.toml` keeps them too
-    and leaves out `strategy_correct_join`, which the viewer does not
-    use (48).
-    An unknown key is refused, and so is an extra folder the workflow
-    does not know. Everything
+    `internal_height` (`--internal`). `[plugins]` names every plugin
+    as `"point/name"`, `true` or `false`, at the default the source
+    gives it. The workflow turns a plugin into the `--use` member it
+    stands for (`KEYS`, `LOOP_KEYS`), or builds it off where it has no
+    member (`BUILT`: its folder's `plugin.cpp` is left out and its code
+    reads `pluginBuilt()`); a plugin with no switch at all (`ALWAYS`)
+    refuses `false`. A config has no comments and its `=` is not
+    aligned, and it lists every plugin. `render_final.toml` draws final
+    frames and refuses plugins whose effect is `Biased`;
+    `render_fast.toml` draws quick frames (tolerance 4) with every
+    plugin at its default; `viewer_fast.toml` keeps them too and leaves
+    out `strategy/join`, which the viewer does not use (48);
+    `reference.toml` names the simplest exact plugin of every point,
+    the reference for correctness. An unknown key is refused, and so
+    is a plugin folder the workflow does not know. Everything
     generated goes to `output/`: the build to `output/build/`, or to
-    `output/build-<names>/` for each set of extras built off (named by
-    their names without point and category), frames to
+    `output/build-<names>/` for each set of plugins built off (named by
+    their names without the point), frames to
     `output/<scene>.ppm` and `.pfm`, the portable zip to
     `output/kodanuki-<version>.zip`. `target/` holds the rest: the CMake
     file, `.clang-format`, the configs, the docs, the tests, the tools,
     the workflow and the files the zip carries (`target/export/`).
+
+52. A `Plugin` holds plain function pointers (`Hooks`). A hook is
+    called once per run, per frame or per batch, or at a pass's launch
+    and fold once per walk or pixel; never once per ray or per vertex.
+    Per-ray variation is a `switch` in the owner's dispatch file.
+53. A step's hook fills the worker in place (`Worker&`): rule 46's
+    exception, stated once for all steps.
+54. A plugin reads its state through one accessor function; the cast
+    from the core's slot (`State`, `stateOf()`) lives there and nowhere
+    else.
+55. What a step reads or writes holds no pointer and no container
+    inside an item. Between steps a vector, a spectrum and a colour are
+    kept as `math::FloatVector`, `FloatSpectrum` and `FloatColour`, a
+    number as `float`; a kernel reads them as the double types. Every
+    such struct and every block element (`Block`) is checked trivially
+    copyable.
+56. Only the core's step functions read a clock to time the steps
+    (core/step.h). A plugin publishes counters (`published`); it times
+    no step and prints no metrics. Writing a report or a progress line
+    is an Observer's work.
+57. The foundation is layered: `shared` (generic tools that are not
+    mathematical: images, `inParallel()`) and `math` (mathematical
+    tools: vectors, random numbers, spectra, colours) depend on
+    nothing of kodanuki, not even on each other; `sdf` and `syntax`
+    depend on them. `shared` knows nothing of the renderer: no
+    `Renderer`, `Plugin`, `Worker`, walks or scenes; it is a small
+    standard library of our own. Something moves into `shared` only
+    when at least two places use it, never because it might be useful.

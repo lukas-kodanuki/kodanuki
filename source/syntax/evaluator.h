@@ -241,6 +241,10 @@ struct Evaluator {
 	 * The default grey material once it is made, or -1.
 	 */
 	std::int32_t defaultMaterial;
+	/**
+	 * Whether the file has read the name `time`.
+	 */
+	bool timed;
 };
 
 /**
@@ -354,11 +358,15 @@ struct LoadedScene {
  * Every long hard union at the top of an object is then cut into
  * objects of its own (unionParts), and every object is compiled into
  * one program. The first error stops the load and comes back as
- * `file:line:column: message`, with an empty scene.
+ * `file:line:column: message`, with an empty scene. The file starts
+ * with one binding at its top level, `time`, which no `let` may
+ * change; SceneFile.timed says whether the file read it.
  *
  * @param path The file.
+ * @param time The number `time` is bound to: 0 for a still, a frame's
+ *        time for a frame of a clip.
  */
-LoadedScene loadScene(const std::string& path);
+LoadedScene loadScene(const std::string& path, double time);
 
 /**
  * Return a list of values.

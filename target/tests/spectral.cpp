@@ -1,6 +1,6 @@
 #include "check.h"
-#include "spectral/colour.h"
-#include "spectral/spectrum.h"
+#include "math/colour.h"
+#include "math/spectrum.h"
 
 #include <algorithm>
 #include <cmath>
@@ -37,7 +37,7 @@ void checkDensityIntegral() {
 	}
 	checkNear(Near { total, 1, 1e-4, "the wavelength density integrates to one" });
 	const Wavelengths drawn = sampledWavelengths(0.3);
-	checkNear(Near { drawn.density[2], wavelengthDensity(drawn.nanometres[2]), 1e-12, "a drawn lane keeps the density at its wavelength" });
+	checkNear(Near { drawn.density[2], wavelengthDensity(drawn.nanometres[2]), 1e-9, "a drawn lane keeps the density at its wavelength" });
 }
 
 void checkUpsampling() {

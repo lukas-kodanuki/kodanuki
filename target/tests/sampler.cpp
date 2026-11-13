@@ -1,11 +1,12 @@
-#include "transport/sampler.h"
+#include "plugins/transport/paths/sampler.h"
 #include "check.h"
-#include "extras/sampler_correct_highlight_guide/survey.h"
-#include "extras/sampler_correct_sobol/sobol.h"
-#include "frame/frame.h"
-#include "frame/run.h"
+#include "core/frame.h"
+#include "core/plugin.h"
+#include "plugins/sampler/highlight_guide/survey.h"
+#include "plugins/sampler/sobol/sobol.h"
+#include "plugins/transport/paths/feature.h"
+#include "plugins/transport/paths/paths.h"
 #include "syntax/evaluator.h"
-#include "transport/feature.h"
 
 #include <array>
 #include <cmath>
@@ -23,9 +24,9 @@ struct Arm {
 	const SceneFile& file;
 	const Tree& tree;
 	const Features& features;
-	const Prepared& prepared;
-	const std::vector<PreparationMember>& preparations;
-	ExecutionMember execution;
+	const ChosenMembers& prepared;
+	const std::vector<Plugin>& preparations;
+	std::string execution;
 };
 
 struct Spread {
@@ -37,10 +38,10 @@ struct Spread {
 struct Pairing {
 	const char* what;
 	std::string text;
-	Prepared off;
-	Prepared on;
-	std::vector<PreparationMember> beforehand;
-	std::vector<PreparationMember> preparations;
+	ChosenMembers off;
+	ChosenMembers on;
+	std::vector<Plugin> beforehand;
+	std::vector<Plugin> preparations;
 };
 
 struct SphereBins {
@@ -58,31 +59,35 @@ Image armFrame(const Arm& arm, int seed) {
 	Shot shot        = arm.file.shot;
 	shot.render.seed = seed;
 
-	const Geometry geometry = {
-		.scene = arm.file.scene,
-		.tree  = arm.tree,
-	};
+	const Geometry geometry = treeGeometry(arm.file.scene, arm.tree);
 
-	const Lens lens   = lensOf(shot.camera, shot.render);
-	Progress progress = freshProgress();
+	const Lens lens           = lensOf(shot.camera, shot.render);
+	const Observing observing = noObserving();
+
+	const PathsWorld paths = {
+		.features    = arm.features,
+		.smoothGlass = SmoothGlass::Exact,
+		.sampling    = arm.prepared.sampling,
+		.strategies  = arm.prepared.strategies,
+	};
 
 	const FrameInput input = {
-		.geometry     = geometry,
-		.looks        = arm.file.looks,
-		.lighting     = arm.file.lighting,
-		.shot         = shot,
-		.lens         = lens,
-		.chosen       = arm.prepared,
-		.preparations = arm.preparations,
-		.features     = arm.features,
-		.stopping     = StoppingMember::FixedCount,
-		.smoothGlass  = SmoothGlass::Exact,
-		.execution    = arm.execution,
-		.threads      = pairThreads,
-		.progress     = progress,
+		.geometry       = geometry,
+		.looks          = arm.file.looks,
+		.lighting       = arm.file.lighting,
+		.shot           = shot,
+		.lens           = lens,
+		.transport      = testPlugin("transport/paths"),
+		.transportWorld = &paths,
+		.preparations   = arm.preparations,
+		.stopping       = testPlugin("stopping/fixed_count"),
+		.perFrame       = 0,
+		.execution      = arm.execution,
+		.threads        = pairThreads,
+		.observing      = observing,
 	};
 
-	return renderFrame(input).image;
+	return stillFrame(input).image;
 }
 
 std::array<double, 3> channelMeans(const Image& image) {
@@ -132,7 +137,7 @@ void checkPairing(const Pairing& pairing) {
 		.features     = features,
 		.prepared     = pairing.off,
 		.preparations = pairing.beforehand,
-		.execution    = ExecutionMember::Waves,
+		.execution    = "execution/packets",
 	};
 
 	const Arm on = {
@@ -141,7 +146,7 @@ void checkPairing(const Pairing& pairing) {
 		.features     = features,
 		.prepared     = pairing.on,
 		.preparations = pairing.preparations,
-		.execution    = ExecutionMember::Waves,
+		.execution    = "execution/packets",
 	};
 
 	const Arm scalar = {
@@ -150,7 +155,7 @@ void checkPairing(const Pairing& pairing) {
 		.features     = features,
 		.prepared     = pairing.on,
 		.preparations = pairing.preparations,
-		.execution    = ExecutionMember::OneAtATime,
+		.execution    = "execution/single",
 	};
 
 	const Spread a = armSpread(off);
@@ -334,9 +339,9 @@ std::string guideText() {
 	)";
 }
 
-Prepared withSampling(const Sampling& sampling) {
-	Prepared prepared = corePrepared();
-	prepared.sampling = sampling;
+ChosenMembers withSampling(const Sampling& sampling) {
+	ChosenMembers prepared = coreChosen();
+	prepared.sampling      = sampling;
 	return prepared;
 }
 
@@ -562,10 +567,7 @@ void checkGathered() {
 	const SceneFile file = sceneOrExit(writeScene("gathered", glowText().c_str()));
 	const TestTree tree  = testTree(file, pairThreads);
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree.tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, tree.tree);
 
 	const SceneFile sky       = sceneOrExit(writeScene("charted", skyText().c_str()));
 	const math::Vector middle = { 0, 0, 0 };
@@ -593,9 +595,9 @@ Lump testLump(const math::Vector& toward, const std::array<double, 3>& factor, d
 		.up        = basis.bitangent,
 		.mean      = { 0.03, -0.02 },
 		.precision = { 0, 0, 0 },
-		.factor    = factor,
+		.factor    = { float(factor[0]), float(factor[1]), float(factor[2]) },
 		.height    = 0,
-		.weight    = weight,
+		.weight    = float(weight),
 		.point     = axis * 2,
 	};
 }
@@ -698,10 +700,7 @@ void checkGuided() {
 	const Strategies chosen   = coreStrategies();
 	const Features features   = featuresOf(featureQueryOf(file, 1));
 
-	const Geometry geometry = {
-		.scene = file.scene,
-		.tree  = tree.tree,
-	};
+	const Geometry geometry = treeGeometry(file.scene, tree.tree);
 
 	const Tracing tracing = {
 		.geometry   = geometry,
@@ -873,8 +872,8 @@ std::string rulesLamp(const std::string& fields) {
 	)";
 }
 
-Prepared withStrategies(const Sampling& sampling, const std::vector<StrategyMember>& members) {
-	Prepared prepared           = withSampling(sampling);
+ChosenMembers withStrategies(const Sampling& sampling, const std::vector<StrategyMember>& members) {
+	ChosenMembers prepared      = withSampling(sampling);
 	prepared.strategies.members = members;
 	return prepared;
 }
@@ -916,16 +915,16 @@ Sampling guidedMirrorSampling() {
 }
 
 void checkFeaturePairings(const char* what, const std::string& text) {
-	const std::vector<PreparationMember> none    = {};
-	const std::vector<PreparationMember> passing = { PreparationMember::MirrorBalls, PreparationMember::LightPass };
-	const std::vector<StrategyMember> meet       = { StrategyMember::Meet };
-	const std::vector<StrategyMember> every      = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join, StrategyMember::Connect };
+	const std::vector<Plugin> none          = {};
+	const std::vector<Plugin> passing       = testPreparations({ "sampler/toward_mirrors", "strategy/join" });
+	const std::vector<StrategyMember> meet  = { StrategyMember::Meet };
+	const std::vector<StrategyMember> every = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join, StrategyMember::Connect };
 
 	const Pairing aimed = {
 		.what         = what,
 		.text         = text,
 		.off          = withStrategies(coreSampling(), meet),
-		.on           = corePrepared(),
+		.on           = coreChosen(),
 		.beforehand   = none,
 		.preparations = none,
 	};
@@ -933,7 +932,7 @@ void checkFeaturePairings(const char* what, const std::string& text) {
 	const Pairing joined = {
 		.what         = what,
 		.text         = text,
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withStrategies(coreSampling(), every),
 		.beforehand   = none,
 		.preparations = passing,
@@ -963,20 +962,20 @@ void checkMediumPairings(const char* what, const std::string& material) {
 }
 
 void checkStrategyPairings() {
-	const std::vector<PreparationMember> none     = {};
-	const std::vector<PreparationMember> passing  = { PreparationMember::MirrorBalls, PreparationMember::LightPass };
-	const std::vector<PreparationMember> surveyed = { PreparationMember::MirrorBalls, PreparationMember::GuideSurvey, PreparationMember::LightPass };
-	const std::vector<StrategyMember> meet        = { StrategyMember::Meet };
-	const std::vector<PreparationMember> shared   = { PreparationMember::LightPass };
-	const std::vector<StrategyMember> joined      = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join };
-	const std::vector<StrategyMember> aimed       = { StrategyMember::Meet, StrategyMember::Aim };
-	const std::vector<StrategyMember> connected   = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Connect };
-	const std::vector<StrategyMember> every       = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join, StrategyMember::Connect };
+	const std::vector<Plugin> none              = {};
+	const std::vector<Plugin> passing           = testPreparations({ "sampler/toward_mirrors", "strategy/join" });
+	const std::vector<Plugin> surveyed          = testPreparations({ "sampler/toward_mirrors", "sampler/highlight_guide", "strategy/join" });
+	const std::vector<StrategyMember> meet      = { StrategyMember::Meet };
+	const std::vector<Plugin> shared            = testPreparations({ "strategy/join" });
+	const std::vector<StrategyMember> joined    = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join };
+	const std::vector<StrategyMember> aimed     = { StrategyMember::Meet, StrategyMember::Aim };
+	const std::vector<StrategyMember> connected = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Connect };
+	const std::vector<StrategyMember> every     = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join, StrategyMember::Connect };
 
 	const Pairing join = {
 		.what         = "Join",
 		.text         = causticText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withStrategies(coreSampling(), joined),
 		.beforehand   = none,
 		.preparations = passing,
@@ -1035,10 +1034,10 @@ void checkUnguided() {
 	const TestTree tree     = testTree(file, pairThreads);
 	const Features features = featuresOf(featureQueryOf(file, pairThreads));
 
-	const Prepared plain                        = corePrepared();
-	const Prepared steered                      = withSampling(guideSampling());
-	const std::vector<PreparationMember> none   = {};
-	const std::vector<PreparationMember> survey = { PreparationMember::GuideSurvey };
+	const ChosenMembers plain        = coreChosen();
+	const ChosenMembers steered      = withSampling(guideSampling());
+	const std::vector<Plugin> none   = {};
+	const std::vector<Plugin> survey = testPreparations({ "sampler/highlight_guide" });
 
 	const Arm core = {
 		.file         = file,
@@ -1046,7 +1045,7 @@ void checkUnguided() {
 		.features     = features,
 		.prepared     = plain,
 		.preparations = none,
-		.execution    = ExecutionMember::Waves,
+		.execution    = "execution/packets",
 	};
 
 	const Arm guided = {
@@ -1055,7 +1054,7 @@ void checkUnguided() {
 		.features     = features,
 		.prepared     = steered,
 		.preparations = survey,
-		.execution    = ExecutionMember::Waves,
+		.execution    = "execution/packets",
 	};
 
 	check(armFrame(core, 1).rgb == armFrame(guided, 1).rgb, "the highlight guide leaves a frame whose only guidable floor says guided = 0 as it was");
@@ -1063,19 +1062,19 @@ void checkUnguided() {
 
 void checkSwitchPairings() {
 	checkUnguided();
-	const std::vector<PreparationMember> none   = {};
-	const std::vector<PreparationMember> mirror = { PreparationMember::MirrorBalls, PreparationMember::LightPass };
-	const std::vector<StrategyMember> joined    = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join };
-	const std::string glows                     = "paint(matte([0.5, 0.6, 0.7]))";
-	const std::string unaimed                   = "paint(matte(#000000, glow = #A0D0FF, strength = 3, aimed = 0)) at([-1, 0.8, 0.8]) box([0.5, 0.5, 0.5]);\n" + glows;
+	const std::vector<Plugin> none           = {};
+	const std::vector<Plugin> mirror         = testPreparations({ "sampler/toward_mirrors", "strategy/join" });
+	const std::vector<StrategyMember> joined = { StrategyMember::Meet, StrategyMember::Aim, StrategyMember::Join };
+	const std::string glows                  = "paint(matte([0.5, 0.6, 0.7]))";
+	const std::string unaimed                = "paint(matte(#000000, glow = #A0D0FF, strength = 3, aimed = 0)) at([-1, 0.8, 0.8]) box([0.5, 0.5, 0.5]);\n" + glows;
 
 	const Pairing aimed = {
 		.what         = "GlowingSurfaces by grid beside a glow that is not aimed at",
 		.text         = replacedText(glowText(), glows, unaimed),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(glowSampling()),
 		.beforehand   = none,
-		.preparations = { PreparationMember::GlowGrid },
+		.preparations = testPreparations({ "sampler/glowing_surfaces" }),
 	};
 
 	const Pairing relays = {
@@ -1098,13 +1097,13 @@ void checkSampler() {
 	checkGathered();
 	checkGuided();
 	checkLumpDensity();
-	const std::vector<PreparationMember> none   = {};
+	const std::vector<Plugin> none              = {};
 	const std::vector<StrategyMember> meetAlone = { StrategyMember::Meet };
 
 	const Pairing sobol = {
 		.what         = "Sobol",
 		.text         = lampsText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(sobolSampling()),
 		.beforehand   = none,
 		.preparations = none,
@@ -1113,7 +1112,7 @@ void checkSampler() {
 	const Pairing eachLamp = {
 		.what         = "EachLampFirst",
 		.text         = lampsText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(eachLampSampling()),
 		.beforehand   = none,
 		.preparations = none,
@@ -1122,44 +1121,44 @@ void checkSampler() {
 	const Pairing skyMap = {
 		.what         = "SkyMap",
 		.text         = skyText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(skySampling()),
 		.beforehand   = none,
-		.preparations = { PreparationMember::SkyChart },
+		.preparations = testPreparations({ "sampler/sky_map" }),
 	};
 
 	const Pairing glowGrid = {
 		.what         = "GlowingSurfaces by grid",
 		.text         = glowText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(glowSampling()),
 		.beforehand   = none,
-		.preparations = { PreparationMember::GlowGrid },
+		.preparations = testPreparations({ "sampler/glowing_surfaces" }),
 	};
 
 	const Pairing guide = {
 		.what         = "HighlightGuide",
 		.text         = guideText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(guideSampling()),
 		.beforehand   = none,
-		.preparations = { PreparationMember::GuideSurvey },
+		.preparations = testPreparations({ "sampler/highlight_guide" }),
 	};
 
 	const Pairing featuredSky = {
 		.what         = "SkyMap over a physical sky with glow and clouds",
 		.text         = featuredSkyText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(skySampling()),
 		.beforehand   = none,
-		.preparations = { PreparationMember::SkyChart },
+		.preparations = testPreparations({ "sampler/sky_map" }),
 	};
 
 	const Pairing paintedAim = {
 		.what         = "Aim under a painted sky with glow, stars, a moon and clouds",
 		.text         = paintedSkyText(),
 		.off          = withStrategies(coreSampling(), meetAlone),
-		.on           = corePrepared(),
+		.on           = coreChosen(),
 		.beforehand   = none,
 		.preparations = none,
 	};
@@ -1167,10 +1166,10 @@ void checkSampler() {
 	const Pairing paintedSky = {
 		.what         = "SkyMap over a painted sky with glow, stars, a moon and clouds",
 		.text         = paintedSkyText(),
-		.off          = corePrepared(),
+		.off          = coreChosen(),
 		.on           = withSampling(skySampling()),
 		.beforehand   = none,
-		.preparations = { PreparationMember::SkyChart },
+		.preparations = testPreparations({ "sampler/sky_map" }),
 	};
 
 	for (const Pairing& pairing : { sobol, eachLamp, skyMap, featuredSky, paintedAim, paintedSky, glowGrid, guide }) {

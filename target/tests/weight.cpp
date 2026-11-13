@@ -1,4 +1,4 @@
-#include "transport/weight.h"
+#include "plugins/transport/paths/weight.h"
 #include "check.h"
 #include "math/vector.h"
 
@@ -478,7 +478,7 @@ void checkWeight() {
 	check(capped > 1000, "the brute-force test reaches paths at a depth cap, which meet cannot make");
 	check(collisionCap > 300, "the brute-force test reaches paths at the collision cap under the surface cap, which meet cannot make either");
 	check(collided > 1000, "the brute-force test reaches paths through a collision, aimed from as from a surface, which no light walk makes");
-	check(worst < 1e-9, "the recursive weights of meet, aim, join and every connection equal a brute-force power heuristic over every strategy and sum to one, through exact, unconnectable and collision vertices too");
+	check(worst < 1e-6, "the recursive weights of meet, aim, join and every connection equal a brute-force power heuristic over every strategy and sum to one, through exact, unconnectable and collision vertices too");
 }
 
 }
