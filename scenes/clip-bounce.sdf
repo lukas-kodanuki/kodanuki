@@ -1,0 +1,46 @@
+import "standard.sdf";
+
+render {
+	width     = 960;
+	height    = 600;
+	tolerance = 2;
+	far       = 30;
+}
+
+clip {
+	duration = 4;
+	rate     = 24;
+}
+
+let around = 2 * pi * time / 4;
+let height = abs(sin(2 * pi * time));
+
+camera {
+	eye    = [5 * cos(around), 5 * sin(around), 2.2];
+	target = [0, 0, 0.6];
+	fov    = 0.7;
+}
+
+sky gradient {
+	zenith  = [0.02, 0.03, 0.06];
+	horizon = [0.05, 0.05, 0.07];
+	ground  = [0.01, 0.01, 0.01];
+}
+
+light sphere {
+	at     = [0, 0, 4];
+	radius = 0.3;
+	power  = [1, 0.9, 0.75] * (30 + 20 * height);
+}
+
+let rubber = plastic(#C41E3A, roughness = 0.4);
+let floor  = matte(ramp(checker(2), #5C4636, #C9B89A));
+
+paint(floor) plane([0, 0, 1], 0);
+
+at([0, 0, 0.3 + 1.2 * height]) scale([1, 1, 0.8 + 0.2 * min(1, 4 * height)]) paint(rubber) sphere(0.3);
+
+for i in 0..6 {
+	let angle = i * pi / 3;
+	at([2 * cos(angle), 2 * sin(angle), 0.5]) paint(metal([0.9, 0.9, 0.9], roughness = 0.2)) cylinder(1, 0.08);
+}
