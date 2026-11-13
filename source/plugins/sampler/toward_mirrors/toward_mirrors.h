@@ -92,10 +92,11 @@ MirrorBalls noMirrorBalls();
  * Bound every scene leaf that may wear a sharp material, by its own
  * material or a coat's, unless it refuses caustics.
  *
- * Each is bounded by the box of the tree's leaves whose programs name
- * it and where it comes within the blend radius and four strays of zero.
- * A surface leaf with no patch is taken in its eighths three times over.
- * The box is held in the ball about its middle.
+ * Each is bounded by the box of the cells, inside the tree's leaves
+ * whose programs name it, where it comes within its own blend reach (the
+ * widest blend among the joins above it) and one stray of zero. A leaf
+ * is taken in its eighths until no cell is wider than the region's
+ * widest side over 2^12. The box is held in the ball about its middle.
  *
  * @param geometry The tree and the scene.
  * @param looks The scene's looks: its materials and coats.

@@ -9,18 +9,18 @@
 
 namespace kodanuki {
 
-constexpr double strayMargin  = 4;
-constexpr int facedLevels     = 3;
 constexpr double leastOfRange = 1e-4;
+constexpr int finestLevels    = 12;
 
 struct Relaying {
 	const Geometry& geometry;
 	std::vector<Program> programs;
 	std::vector<std::vector<std::uint32_t>> objects;
 	std::vector<std::vector<std::uint32_t>> cuts;
-	double blend;
+	std::vector<double> blends;
 	double least;
 	double widest;
+	double finest;
 };
 
 struct Grown {
@@ -31,7 +31,6 @@ struct Grown {
 struct RelayCell {
 	std::uint32_t leaf;
 	double stray;
-	int finer;
 };
 
 struct RelayCone {
@@ -97,12 +96,23 @@ std::vector<std::vector<std::uint32_t>> namedByCuts(const Geometry& geometry, co
 	return named;
 }
 
-double blendRadius(const Scene& scene) {
-	double blend = 0;
-	for (const Node& node : scene.nodes) {
-		blend = std::max(blend, node.radius);
+void reachedBlends(const Scene& scene, std::uint32_t node, double reach, std::vector<double>& blends) {
+	const Node& at = scene.nodes[node];
+	if (at.join == Join::Leaf) {
+		blends[at.leaf] = std::max(blends[at.leaf], reach);
+		return;
 	}
-	return blend;
+	for (const std::uint32_t child : at.children) {
+		reachedBlends(scene, child, std::max(reach, at.radius), blends);
+	}
+}
+
+std::vector<double> leafBlends(const Scene& scene) {
+	std::vector<double> blends(scene.leaves.size(), 0.0);
+	for (const std::uint32_t object : scene.objects) {
+		reachedBlends(scene, object, 0.0, blends);
+	}
+	return blends;
 }
 
 double widestStray(const Tree& tree) {
@@ -113,8 +123,12 @@ double widestStray(const Tree& tree) {
 	return widest;
 }
 
+double regionSide(const Region& region) {
+	return std::max({ region.size[0], region.size[1], region.size[2] });
+}
+
 double leastTolerance(const Region& region) {
-	return leastOfRange * std::max({ region.size[0], region.size[1], region.size[2] });
+	return leastOfRange * regionSide(region);
 }
 
 Program noProgram() {
@@ -140,9 +154,10 @@ Relaying relayingOf(const Geometry& geometry, const std::vector<bool>& relays) {
 		.programs = relayPrograms(geometry.scene, relays),
 		.objects  = namedByPrograms(geometry.scene.objectPrograms, relays),
 		.cuts     = namedByCuts(geometry, relays),
-		.blend    = blendRadius(geometry.scene),
+		.blends   = leafBlends(geometry.scene),
 		.least    = leastTolerance(treeOf(geometry).region),
 		.widest   = widestStray(treeOf(geometry)),
+		.finest   = std::ldexp(regionSide(treeOf(geometry).region), -finestLevels),
 	};
 }
 
@@ -167,8 +182,12 @@ Box joinedBox(const Box& a, const Box& b) {
 bool nearSurface(const Relaying& relaying, const RelayCell& cell, const Box& box) {
 	const Program& program                     = relaying.programs[cell.leaf];
 	const std::vector<math::Interval> interval = intervalsOver(program, box);
-	const double slack                         = relaying.blend + strayMargin * (relaying.least + cell.stray);
+	const double slack                         = relaying.blends[cell.leaf] + relaying.least + cell.stray;
 	return interval[program.result].lower <= slack && interval[program.result].upper >= -slack;
+}
+
+double largestSide(const Box& box) {
+	return std::max({ box.axes[0].upper - box.axes[0].lower, box.axes[1].upper - box.axes[1].lower, box.axes[2].upper - box.axes[2].lower });
 }
 
 void growBox(Grown& grown, std::uint32_t leaf, const Box& box) {
@@ -183,19 +202,12 @@ void growNear(const Relaying& relaying, const RelayCell& cell, const Box& box, G
 	if (!nearSurface(relaying, cell, box)) {
 		return;
 	}
-	if (cell.finer == 0) {
+	if (largestSide(box) <= relaying.finest) {
 		growBox(grown, cell.leaf, box);
 		return;
 	}
-
-	const RelayCell finer = {
-		.leaf  = cell.leaf,
-		.stray = cell.stray,
-		.finer = cell.finer - 1,
-	};
-
 	for (int octant = 0; octant < 8; ++octant) {
-		growNear(relaying, finer, octantBox(box, octant), grown);
+		growNear(relaying, cell, octantBox(box, octant), grown);
 	}
 }
 
@@ -208,15 +220,11 @@ RelayCell relayCellOf(const Relaying& relaying, const CellEntry& entry, std::uin
 		return RelayCell {
 			.leaf  = leaf,
 			.stray = relaying.widest,
-			.finer = 0,
 		};
 	}
-	const SurfaceLeaf& surface = treeOf(relaying.geometry).surfaces[entry.payload];
-	const bool faced           = runHeader(treeOf(relaying.geometry).runs[surface.run]).patches == 0;
 	return RelayCell {
 		.leaf  = leaf,
-		.stray = loosenedOf(surface),
-		.finer = faced ? facedLevels : 0,
+		.stray = loosenedOf(treeOf(relaying.geometry).surfaces[entry.payload]),
 	};
 }
 
